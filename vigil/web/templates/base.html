@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}vigil{% endblock %} · vigil</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='6' fill='none' stroke='%236fd6a0' stroke-width='2.5'/%3E%3Ccircle cx='8' cy='8' r='2' fill='%236fd6a0'/%3E%3C/svg%3E">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="{{ url_for('overview', range=range_key) }}"><span class="mark"></span>vigil</a>
+  <nav>
+    {% set ep = request.endpoint %}
+    <a href="{{ url_for('overview', range=range_key) }}" class="{{ 'on' if ep == 'overview' }}">Overview</a>
+    <a href="{{ url_for('alerts', range=range_key) }}" class="{{ 'on' if ep in ('alerts', 'alert_detail') }}">Alerts</a>
+    <a href="{{ url_for('agents', range=range_key) }}" class="{{ 'on' if ep == 'agents' }}">Agents</a>
+    <a href="{{ url_for('rules', range=range_key) }}" class="{{ 'on' if ep == 'rules' }}">Rules</a>
+  </nav>
+  <form class="investigate" action="{{ url_for('investigate_search') }}" method="get" role="search">
+    <label class="sr" for="ip-search">Investigate an IP</label>
+    <input id="ip-search" name="ip" placeholder="investigate IP…  /" autocomplete="off" spellcheck="false">
+  </form>
+  {% set ok, msg = source_health %}
+  <span class="source" title="{{ msg }}"><span class="pulse {{ '' if ok else 'down' }}"></span><span class="label">{{ source_name }}</span></span>
+  <label class="live" title="Refresh every 15 seconds while this tab is visible">
+    <input type="checkbox" id="live"> Live
+  </label>
+</header>
+<main>
+  {% if not source_health[0] %}<div class="banner">Alert source problem: {{ source_health[1] }}</div>{% endif %}
+  {% if g.truncated %}<div class="banner">Showing the newest alerts only (the source returned more than the fetch limit). Narrow the time range or add filters to see everything.</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

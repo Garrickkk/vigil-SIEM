@@ -1,0 +1,10 @@
+# secrets and local state
+.env
+*.db
+# the upstream Wazuh deployment (cloned by setup/vigil.ps1) holds generated TLS keys
+wazuh-docker/
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/

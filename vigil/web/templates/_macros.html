@@ -1,0 +1,48 @@
+{% macro sev(s) -%}<span class="sev sev-{{ s }}">{{ s }}</span>{%- endmacro %}
+
+{% macro status(s) -%}<span class="status st-{{ s }}">{{ s }}</span>{%- endmacro %}
+
+{% macro ip(addr) -%}
+  {%- if addr -%}<a class="mono ip" href="{{ url_for('investigate', addr=addr) }}" title="Investigate {{ addr }}">{{ addr }}</a>{%- else -%}<span class="muted">-</span>{%- endif -%}
+{%- endmacro %}
+
+{# A thin horizontal bar, drawn in SVG so it works under a strict CSP (no inline styles). #}
+{% macro bar(value, total, cls) -%}
+<svg viewBox="0 0 100 8" preserveAspectRatio="none" aria-hidden="true">
+  <rect class="f-track" x="0" y="0" width="100" height="8" rx="4"/>
+  {% if value %}<rect class="f-{{ cls }}" x="0" y="0" width="{{ [value / (total or 1) * 100, 2]|max|round(1) }}" height="8" rx="4"/>{% endif %}
+</svg>
+{%- endmacro %}
+
+{% macro ranges() %}
+<div class="ranges">
+  {% for k in RANGES %}<a href="{{ url_with(range=k, page=None) }}" class="{{ 'on' if k == range_key }}">{{ k }}</a>{% endfor %}
+</div>
+{% endmacro %}
+
+{% macro group_table(groups, selectable=false) %}
+<table class="grid">
+  <thead><tr>
+    {% if selectable %}<th class="check"><input type="checkbox" id="select-all" aria-label="Select all"></th>{% endif %}
+    <th>Severity</th><th>Alert</th><th>Source IP</th><th>User / Agent</th>
+    <th class="num">Count</th><th>Last seen</th><th>Status</th>
+  </tr></thead>
+  <tbody>
+  {% for g in groups %}
+    <tr data-href="{{ url_for('alert_detail', alert_id=g.latest.id) }}">
+      {% if selectable %}<td class="check"><input type="checkbox" class="pick" name="group" value="{{ g.rule_id }}|{{ g.src_ip }}|{{ g.agent_name }}" aria-label="Select"></td>{% endif %}
+      <td>{{ sev(g.severity) }}</td>
+      <td><a href="{{ url_for('alert_detail', alert_id=g.latest.id) }}">{{ g.latest.description }}</a>
+          <span class="muted small mono">rule {{ g.rule_id }}</span></td>
+      <td>{{ ip(g.src_ip) }}</td>
+      <td class="mono small">{{ g.latest.who or '' }}{% if g.latest.who %} <span class="muted">on</span> {% endif %}{{ g.agent_name or '-' }}</td>
+      <td class="num mono">{% if g.count > 1 %}<a href="{{ url_for('alerts', view='all', rule_id=g.rule_id, src_ip=g.src_ip, agent=g.agent_name, range=range_key, status='') }}" title="Show every alert in this group">×{{ g.count }}</a>{% else %}1{% endif %}</td>
+      <td class="nowrap" title="first {{ g.first_seen|ts }} · last {{ g.last_seen|ts }}">{{ g.last_seen|ago }}</td>
+      <td>{{ status(g.status) }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="8" class="empty">No alerts here. Either it's quiet, or the filters are too narrow.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}

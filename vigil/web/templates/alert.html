@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sev, ip, status with context %}
+{% block title %}{{ a.description }}{% endblock %}
+{% block content %}
+<a class="back small" href="{{ url_for('alerts') }}">← Alerts</a>
+<div class="head-row">
+  <h1>{{ sev(a.severity) }} {{ a.description }} <span class="muted mono small">rule {{ a.rule_id }} · level {{ a.level }}</span></h1>
+  {{ status(t.status) }}
+</div>
+
+<div class="cols two">
+  <section class="card">
+    <div class="card-head"><h2>What happened</h2><span class="muted small">{{ a.ts|ago }}</span></div>
+    <dl class="facts">
+      <dt>Time</dt><dd class="mono">{{ a.ts|ts }}</dd>
+      <dt>Source IP</dt><dd>{{ ip(a.src_ip) }}{% if a.src_ip %} <a class="small" href="{{ url_for('investigate', addr=a.src_ip) }}">attack chain →</a>{% endif %}</dd>
+      <dt>User</dt><dd class="mono">{{ a.who or '-' }}</dd>
+      <dt>Agent</dt><dd class="mono"><a href="{{ url_for('alerts', agent=a.agent_name, status='') }}">{{ a.agent_name or '-' }}</a>
+        {% if a.agent_id %}<span class="muted">#{{ a.agent_id }}{% if a.agent_ip %} · {{ a.agent_ip }}{% endif %}</span>{% endif %}</dd>
+      <dt>Log source</dt><dd class="mono">{{ a.location or '-' }} {% if a.decoder %}<span class="muted">(decoder {{ a.decoder }})</span>{% endif %}</dd>
+      <dt>Rule</dt><dd><a class="mono" href="{{ url_for('alerts', rule_id=a.rule_id, status='') }}">{{ a.rule_id }}</a>
+        <span class="muted small">fired {{ a.firedtimes }}× since the manager last restarted</span></dd>
+      <dt>MITRE ATT&amp;CK</dt><dd class="chips">
+        {% for m in a.mitre_ids %}<a class="chip" href="{{ m|mitre_url }}" target="_blank" rel="noopener noreferrer" title="{{ a.mitre_techniques[loop.index0] if a.mitre_techniques|length > loop.index0 }}">{{ m }}</a>{% else %}<span class="muted">not mapped</span>{% endfor %}
+        {% for tac in a.mitre_tactics %}<a class="chip" href="{{ url_for('alerts', mitre=tac, status='') }}"><b>{{ tac }}</b></a>{% endfor %}
+      </dd>
+      <dt>Rule groups</dt><dd class="chips">{% for grp in a.groups if not grp.startswith(('pci_', 'gdpr_', 'hipaa_', 'nist_', 'tsc_', 'gpg13_')) %}<span class="tag">{{ grp }}</span> {% endfor %}</dd>
+    </dl>
+    <div class="card-head sub"><h2>Raw log</h2></div>
+    <pre class="log">{{ a.full_log or '(no raw log on this alert)' }}</pre>
+  </section>
+
+  <div>
+    <section class="card">
+      <div class="card-head"><h2>Triage</h2>{% if t.updated_at %}<span class="muted small">updated {{ t.updated_at|ago }}</span>{% endif %}</div>
+      <form class="triage" method="post" action="{{ url_for('triage_alert', alert_id=a.id) }}">
+        <div class="seg" role="radiogroup" aria-label="Status">
+          {% for st in STATUSES %}
+            <label><input type="radio" name="status" value="{{ st }}" {{ 'checked' if t.status == st }}><span>{{ st }}</span></label>
+          {% endfor %}
+        </div>
+        <label class="sr" for="note">Note</label>
+        <textarea id="note" name="note" maxlength="2000" placeholder="Why? (e.g. 'my own nmap test', 'reset deploy's password')">{{ t.note }}</textarea>
+        {% if same_group|length > 1 %}
+          <input type="hidden" name="group_ids" value="{{ same_group|map(attribute='id')|join(',') }}">
+          <label class="small muted"><input type="checkbox" name="scope" value="group" checked>
+            apply to all {{ same_group|length }} alerts from this rule, IP and agent</label>
+        {% endif %}
+        <button class="primary" type="submit">Save</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Other alerts from this IP</h2><span class="muted small">last 7 days</span></div>
+      {% if not a.src_ip %}
+        <p class="muted small">This alert has no source IP.</p>
+      {% else %}
+      <table class="grid compact">
+        <tbody>
+        {% for o in others %}
+          <tr data-href="{{ url_for('alert_detail', alert_id=o.id) }}">
+            <td>{{ sev(o.severity) }}</td>
+            <td><a href="{{ url_for('alert_detail', alert_id=o.id) }}">{{ o.description }}</a></td>
+            <td class="nowrap muted small">{{ o.ts|ago }}</td></tr>
+        {% else %}<tr><td class="empty">Nothing else from {{ a.src_ip }}.</td></tr>{% endfor %}
+        </tbody>
+      </table>
+      {% if same_group|length > 1 %}<p class="small"><a href="{{ url_for('alerts', view='all', rule_id=a.rule_id, src_ip=a.src_ip, agent=a.agent_name, range='7d', status='') }}">{{ same_group|length }} alerts in this group →</a></p>{% endif %}
+      {% endif %}
+    </section>
+  </div>
+</div>
+
+<section class="card">
+  <details class="json">
+    <summary>Full Wazuh alert JSON</summary>
+    <pre>{{ raw_json }}</pre>
+  </details>
+</section>
+{% endblock %}

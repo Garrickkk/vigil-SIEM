@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sev, ip, status as status_badge, ranges, group_table with context %}
+{% block title %}Alerts{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>Alerts <span class="muted small mono">{{ "{:,}".format(total) }} {{ 'groups' if view == 'grouped' else 'alerts' }}{% if view == 'grouped' %} from {{ "{:,}".format(alert_total) }} alerts{% endif %}</span></h1>
+  {{ ranges() }}
+</div>
+
+<form class="filters" method="get" action="{{ url_for('alerts') }}">
+  <input type="hidden" name="range" value="{{ range_key }}">
+  <input type="hidden" name="view" value="{{ view }}">
+  <label class="sr" for="q">Search</label>
+  <input class="grow" id="q" name="q" value="{{ filters.q }}" placeholder="Search description, raw log, IP, user, rule ID…">
+  <select name="severity" aria-label="Severity">
+    <option value="">any severity</option>
+    {% for x in SEVERITIES %}<option value="{{ x }}" {{ 'selected' if filters.severity == x }}>{{ x }}</option>{% endfor %}
+  </select>
+  <select name="status" aria-label="Status">
+    <option value="" {{ 'selected' if not status_filter }}>any status</option>
+    {% for x in STATUSES %}<option value="{{ x }}" {{ 'selected' if status_filter == x }}>{{ x }}</option>{% endfor %}
+  </select>
+  <select name="agent" aria-label="Agent">
+    <option value="">any agent</option>
+    {% for x in agents %}<option value="{{ x }}" {{ 'selected' if filters.agent == x }}>{{ x }}</option>{% endfor %}
+    {% if filters.agent and filters.agent not in agents %}<option selected>{{ filters.agent }}</option>{% endif %}
+  </select>
+  <select name="mitre" aria-label="ATT&amp;CK tactic">
+    <option value="">any tactic</option>
+    {% for x in tactics %}<option value="{{ x }}" {{ 'selected' if filters.mitre == x }}>{{ x }}</option>{% endfor %}
+    {% if filters.mitre and filters.mitre not in tactics %}<option selected>{{ filters.mitre }}</option>{% endif %}
+  </select>
+  {% if filters.rule_id %}<input type="hidden" name="rule_id" value="{{ filters.rule_id }}">{% endif %}
+  {% if filters.src_ip %}<input type="hidden" name="src_ip" value="{{ filters.src_ip }}">{% endif %}
+  <button type="submit">Filter</button>
+</form>
+
+{% set active = filters.active() %}
+{% if active %}
+<div class="chips filter-chips">
+  {% for k, v in active.items() %}<a class="chip x" href="{{ url_with(**{k: None, 'page': None}) }}" title="Remove this filter">{{ k|replace('_', ' ') }}: <b>{{ v }}</b></a>{% endfor %}
+  <a class="small" href="{{ url_for('alerts', range=range_key, view=view) }}">clear all</a>
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('triage_bulk') }}">
+<input type="hidden" name="range" value="{{ range_key }}">
+<div class="toolbar">
+  <div class="seg-links" role="tablist">
+    <a href="{{ url_with(view=None, page=None) }}" class="{{ 'on' if view == 'grouped' }}" title="One row per rule + source IP + agent">Grouped</a>
+    <a href="{{ url_with(view='all', page=None) }}" class="{{ 'on' if view == 'all' }}" title="One row per Wazuh alert">Every alert</a>
+  </div>
+  <div class="bulk">
+    <span class="picked muted small"></span>
+    <button class="sm" name="status" value="acknowledged">Acknowledge</button>
+    <button class="sm" name="status" value="closed">Close</button>
+    <button class="sm" name="status" value="open">Reopen</button>
+    <a class="small" href="{{ url_for('alerts_csv', **request.args) }}" title="Every matching alert as CSV">Export CSV</a>
+  </div>
+</div>
+
+<section class="card flush">
+{% if view == 'grouped' %}
+  {{ group_table(rows, selectable=true) }}
+{% else %}
+  <table class="grid">
+    <thead><tr><th class="check"><input type="checkbox" id="select-all" aria-label="Select all"></th>
+      <th>Time</th><th>Severity</th><th>Alert</th><th>Source IP</th><th>Agent</th><th>Status</th></tr></thead>
+    <tbody>
+    {% for a in rows %}
+      <tr data-href="{{ url_for('alert_detail', alert_id=a.id) }}">
+        <td class="check"><input type="checkbox" class="pick" name="alert" value="{{ a.id }}" aria-label="Select"></td>
+        <td class="mono small nowrap">{{ a.ts|ts }}</td>
+        <td>{{ sev(a.severity) }} <span class="lvl">L{{ a.level }}</span></td>
+        <td><a href="{{ url_for('alert_detail', alert_id=a.id) }}">{{ a.description }}</a> <span class="lvl">{{ a.rule_id }}</span>
+            <div class="raw">{{ a.full_log|truncate(220) }}</div></td>
+        <td>{{ ip(a.src_ip) }}</td>
+        <td class="mono small">{{ a.agent_name }}</td>
+        <td>{{ status_badge(status[a.id]) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="empty">No alerts match.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+</section>
+</form>
+
+{% if pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}<a href="{{ url_with(page=page - 1) }}">← newer</a>{% else %}<span class="muted">← newer</span>{% endif %}
+  <span class="muted small">page {{ page }} of {{ pages }}</span>
+  {% if page < pages %}<a href="{{ url_with(page=page + 1) }}">older →</a>{% else %}<span class="muted">older →</span>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

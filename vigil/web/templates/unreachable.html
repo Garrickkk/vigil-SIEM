@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Can't reach Wazuh{% endblock %}
+{% block content %}
+<div class="head-row"><h1>Can't load alerts</h1></div>
+<section class="card">
+  <p class="desc"><b>{{ message }}</b></p>
+  <p class="muted small mono">{{ error }}</p>
+  <div class="card-head sub"><h2>Things to check</h2></div>
+  <ul class="desc">
+    <li>Is Wazuh running? <span class="mono">.\setup\vigil.ps1 status</span></li>
+    <li>Right address and login? <span class="mono">VIGIL_INDEXER_URL</span>, <span class="mono">VIGIL_INDEXER_USER</span>, <span class="mono">VIGIL_INDEXER_PASSWORD</span></li>
+    <li>TLS: <span class="mono">VIGIL_CA_CERT</span> should point at wazuh-docker's <span class="mono">root-ca.pem</span>, and <span class="mono">VIGIL_TLS_HOSTNAME</span> should be <span class="mono">wazuh.indexer</span></li>
+    <li>Just want to look around? <span class="mono">python -m vigil serve --demo</span></li>
+  </ul>
+</section>
+{% endblock %}

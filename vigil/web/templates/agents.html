@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sev, ranges with context %}
+{% block title %}Agents{% endblock %}
+{% block content %}
+<div class="head-row"><h1>Agents</h1>{{ ranges() }}</div>
+<section class="card flush">
+  <table class="grid">
+    <thead><tr><th>Agent</th><th>ID</th><th>IP</th><th>Worst</th><th>Severity mix</th><th class="num">Alerts</th><th>Last alert</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr data-href="{{ url_for('alerts', agent=r.name, range=range_key, status='') }}">
+        <td class="mono"><a href="{{ url_for('alerts', agent=r.name, range=range_key, status='') }}">{{ r.name }}</a></td>
+        <td class="mono muted">{{ r.id or '-' }}</td>
+        <td class="mono">{{ r.ip or '-' }}</td>
+        <td>{{ sev(r.severity) }}</td>
+        <td><span class="mini" title="{% for x in SEVERITIES %}{{ r.by_severity[x] }} {{ x }}{{ ', ' if not loop.last }}{% endfor %}">
+          {% for x in SEVERITIES %}<i class="{{ 'on-' ~ x if r.by_severity[x] }}"></i>{% endfor %}</span></td>
+        <td class="num mono">{{ r.count }}</td>
+        <td class="nowrap">{{ r.last_seen|ago }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="empty">No agent has raised an alert in this range. Enroll one with agent/install-agent.sh.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+<p class="muted small">Only agents with alerts in the selected range are listed. The Wazuh dashboard's Agents page shows connection status for every enrolled agent.</p>
+{% endblock %}

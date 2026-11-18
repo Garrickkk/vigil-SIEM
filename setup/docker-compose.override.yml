@@ -1,0 +1,26 @@
+# Merged automatically into wazuh-docker's single-node docker-compose.yml
+# (vigil.ps1 copies it next to that file).
+#
+# Upstream publishes every port on all interfaces, which puts the indexer
+# (with its default admin password) on your LAN. Here only the agent ports
+# stay reachable from the lab network; everything you use from a browser or
+# script is bound to localhost.
+#
+# `!override` replaces the upstream port list instead of appending to it
+# (needs Docker Compose 2.24+).
+
+services:
+  wazuh.manager:
+    ports: !override
+      - "1514:1514"             # agent events
+      - "1515:1515"             # agent enrollment
+      - "127.0.0.1:55000:55000" # Wazuh API
+      # 514/udp (raw syslog) is left closed: everything in this lab uses agents.
+
+  wazuh.indexer:
+    ports: !override
+      - "127.0.0.1:9200:9200"   # OpenSearch, read by the vigil dashboard
+
+  wazuh.dashboard:
+    ports: !override
+      - "127.0.0.1:443:5601"    # Wazuh dashboard

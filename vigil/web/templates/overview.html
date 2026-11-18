@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sev, ip, bar, ranges, group_table with context %}
+{% block title %}Overview{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>Overview</h1>
+  {{ ranges() }}
+</div>
+
+<section class="kpis">
+  <a class="kpi" href="{{ url_for('alerts', range=range_key) }}">
+    <div class="label">Open alerts</div><div class="value {{ 'warm' if s.open }}">{{ "{:,}".format(s.open) }}</div>
+    <div class="hint">{{ group_count }} distinct groups</div></a>
+  <a class="kpi" href="{{ url_for('alerts', range=range_key, severity='critical') }}">
+    <div class="label">Critical + high open</div><div class="value {{ 'hot' if s.urgent_open }}">{{ s.urgent_open }}</div>
+    <div class="hint">level 10 and above</div></a>
+  <div class="kpi"><div class="label">Alerts in range</div><div class="value">{{ "{:,}".format(s.total) }}</div>
+    <div class="hint">{{ s.top_ips|length }} attacking IPs shown</div></div>
+  <a class="kpi" href="{{ url_for('agents', range=range_key) }}">
+    <div class="label">Agents reporting</div><div class="value">{{ s.agents|length }}</div>
+    <div class="hint">with alerts in range</div></a>
+  <div class="kpi"><div class="label">Last alert</div><div class="value small-value">{{ s.latest_ts|ago }}</div>
+    <div class="hint">{{ s.latest_ts|ts('%H:%M:%S') }}</div></div>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>Alerts over time</h2>
+    <span class="legend">{% for x in SEVERITIES %}<i class="sw f-{{ x }}"></i>{{ x }}{% endfor %}</span></div>
+  {% set n = buckets|length %}{% set w = 960 / n %}
+  <svg class="timeline" viewBox="0 0 960 140" preserveAspectRatio="none" role="img" aria-label="Alerts per time slot, stacked by severity">
+    {% for b in buckets %}
+      {% set x = loop.index0 * w %}
+      <g class="slot">
+        <title>{{ b.start|ts('%b %d %H:%M') }} · {{ b.total }} alerts{% for x2 in SEVERITIES if b.counts[x2] %} · {{ b.counts[x2] }} {{ x2 }}{% endfor %}</title>
+        <rect class="bg" x="{{ x|round(2) }}" y="0" width="{{ w|round(2) }}" height="140"/>
+        {% set ns = namespace(y=139) %}
+        {% for x2 in SEVERITIES|reverse %}{% if b.counts[x2] %}
+          {% set h = [b.counts[x2] / peak * 132, 2]|max %}
+          {% set ns.y = ns.y - h %}
+          <rect class="f-{{ x2 }}" x="{{ (x + 1.5)|round(2) }}" y="{{ ns.y|round(2) }}" width="{{ [w - 3, 1]|max|round(2) }}" height="{{ h|round(2) }}" rx="1.5"/>
+        {% endif %}{% endfor %}
+      </g>
+    {% endfor %}
+    <line class="baseline" x1="0" y1="139.5" x2="960" y2="139.5"/>
+  </svg>
+  <div class="axis"><span>{{ since|ts('%b %d %H:%M') }}</span><span>{{ buckets[n // 2].start|ts('%b %d %H:%M') }}</span><span>now</span></div>
+</section>
+
+<section class="card">
+  <div class="card-head"><h2>MITRE ATT&amp;CK tactics seen</h2><span class="muted small">kill-chain order · click to filter</span></div>
+  <div class="tactics">
+    {% for t in s.tactics %}
+      {% if t.count %}
+        <a class="tactic t-{{ t.severity }}" href="{{ url_for('alerts', range=range_key, mitre=t.tactic, status='') }}"><span>{{ t.tactic }}</span><b>{{ t.count }}</b></a>
+      {% else %}
+        <div class="tactic none"><span>{{ t.tactic }}</span><b>0</b></div>
+      {% endif %}
+    {% endfor %}
+  </div>
+</section>
+
+<div class="cols">
+  <section class="card">
+    <div class="card-head"><h2>Open alerts by severity</h2></div>
+    {% set total = s.by_severity.values()|sum %}
+    {% for x in SEVERITIES %}
+      <a class="hbar" href="{{ url_for('alerts', range=range_key, severity=x) }}">
+        <span>{{ sev(x) }}</span>{{ bar(s.by_severity[x], total, x) }}<span class="hbar-n">{{ s.by_severity[x] }}</span>
+      </a>
+    {% endfor %}
+    <div class="card-head sub"><h2>Agents</h2></div>
+    <table class="grid compact">
+      <tbody>
+      {% for a in s.agents[:4] %}
+        <tr><td class="mono"><a href="{{ url_for('alerts', range=range_key, agent=a.name, status='') }}">{{ a.name }}</a></td>
+            <td>{{ sev(a.severity) }}</td><td class="num mono">{{ a.count }}</td></tr>
+      {% else %}<tr><td class="empty">No agents reporting</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Top source IPs</h2></div>
+    <table class="grid compact">
+      <thead><tr><th>IP</th><th>Worst</th><th class="num" title="ATT&amp;CK tactics reached">Tactics</th><th class="num">Alerts</th></tr></thead>
+      <tbody>
+      {% for r in s.top_ips %}
+        <tr data-href="{{ url_for('investigate', addr=r.ip, range=range_key) }}">
+          <td>{{ ip(r.ip) }}</td><td>{{ sev(r.severity) }}</td>
+          <td class="num mono">{{ r.tactics or '-' }}</td><td class="num mono">{{ r.count }}</td></tr>
+      {% else %}<tr><td colspan="4" class="empty">No source IPs in range</td></tr>{% endfor %}
+      </tbody>
+    </table>
+    <p class="muted small">Click an IP to see its alerts as an attack chain.</p>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h2>Top rules</h2><a class="small" href="{{ url_for('rules', range=range_key) }}">All rules →</a></div>
+    <table class="grid compact">
+      <tbody>
+      {% for r in s.top_rules %}
+        <tr data-href="{{ url_for('alerts', range=range_key, rule_id=r.rule_id, status='') }}">
+          <td>{{ sev(r.severity) }}</td>
+          <td><a href="{{ url_for('alerts', range=range_key, rule_id=r.rule_id, status='') }}">{{ r.description }}</a>
+              <span class="lvl">{{ r.rule_id }}</span></td>
+          <td class="num mono">{{ r.count }}</td></tr>
+      {% else %}<tr><td class="empty">No rules fired in range</td></tr>{% endfor %}
+      </tbody>
+    </table>
+  </section>
+</div>
+
+<section class="card">
+  <div class="card-head"><h2>Latest alert groups</h2><a href="{{ url_for('alerts', range=range_key) }}" class="small">All alerts →</a></div>
+  {{ group_table(groups) }}
+</section>
+{% endblock %}

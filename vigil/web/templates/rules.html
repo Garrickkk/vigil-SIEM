@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% from "_macros.html" import sev, ranges with context %}
+{% block title %}Rules{% endblock %}
+{% block content %}
+<div class="head-row"><h1>Rules that fired <span class="muted small mono">{{ rows|length }}</span></h1>{{ ranges() }}</div>
+<section class="card flush">
+  <table class="grid">
+    <thead><tr><th>Severity</th><th>Rule</th><th>Description</th><th>MITRE</th><th class="num">Alerts</th><th class="num">IPs</th><th>Agents</th><th>Last</th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr data-href="{{ url_for('alerts', rule_id=r.rule_id, range=range_key, status='') }}">
+        <td>{{ sev(r.severity) }} <span class="lvl">L{{ r.level }}</span></td>
+        <td class="mono"><a href="{{ url_for('alerts', rule_id=r.rule_id, range=range_key, status='') }}">{{ r.rule_id }}</a></td>
+        <td>{{ r.description }}
+          <div class="chips">{% for grp in r.groups if not grp.startswith(('pci_', 'gdpr_', 'hipaa_', 'nist_', 'tsc_', 'gpg13_')) %}<span class="tag">{{ grp }}</span> {% endfor %}</div></td>
+        <td>{% for m in r.mitre_ids %}<a class="tag" href="{{ m|mitre_url }}" target="_blank" rel="noopener noreferrer">{{ m }}</a> {% else %}<span class="muted">-</span>{% endfor %}</td>
+        <td class="num mono">{{ r.count }}</td>
+        <td class="num mono">{{ r.sources or '-' }}</td>
+        <td class="mono small">{{ r.agents|join(', ') }}</td>
+        <td class="nowrap">{{ r.last_seen|ago }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="empty">No rules fired in this range.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+<p class="muted small">Rule IDs below 100000 are Wazuh's built-in ruleset. Custom rules (100000+) will show up here too once you add them.</p>
+{% endblock %}
