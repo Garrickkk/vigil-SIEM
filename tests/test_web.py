@@ -103,3 +103,41 @@ def test_unreachable_source_shows_help():
     app = create_app(Down([]), ":memory:")
     resp = app.test_client().get("/")
     assert resp.status_code == 502 and b"reach the indexer" in resp.data
+
+
+@pytest.fixture()
+def indexer_client():
+    import copy
+    from fake_opensearch import FakeOpenSearch, attach
+    from vigil.sources import IndexerSource
+    docs = generate(datetime.now().astimezone())
+    src = IndexerSource("https://localhost:9200", "admin", "pw", ca_cert=False)
+    attach(src, FakeOpenSearch(copy.deepcopy(docs)))
+    src.health = lambda: (True, "indexer green")
+    app = create_app(src, ":memory:")
+    return app.test_client(), docs
+
+
+@pytest.mark.parametrize("url", ["/", "/?range=7d", "/alerts", "/alerts?view=all&status=",
+                                 "/alerts?q=sqlmap&status=", "/agents", "/rules",
+                                 "/ip/192.0.2.77", "/ip/198.51.100.1"])
+def test_pages_render_from_indexer(indexer_client, url):
+    client, _ = indexer_client
+    assert client.get(url).status_code == 200
+
+
+def test_indexer_detail_and_group_triage(indexer_client):
+    client, docs = indexer_client
+    fail = next(i for i, d in docs if d["rule"]["id"] == "5760" and d.get("data", {}).get("srcip") == "192.0.2.77")
+    page = client.get(f"/alert/{fail}").get_data(as_text=True)
+    assert "apply to all 8 alerts" in page
+    client.post(f"/alert/{fail}/triage", data={"status": "closed", "scope": "group"}, headers=ORIGIN)
+    html = client.get("/alerts?status=closed").get_data(as_text=True)
+    assert "sshd: authentication failed." in html
+
+
+def test_ip_page_shows_after_login_once(indexer_client):
+    client, _ = indexer_client
+    html = client.get("/ip/192.0.2.77").get_data(as_text=True)
+    assert html.count("After the login ·") == 1
+    assert "New user added to the system." in html

@@ -46,6 +46,33 @@ def parse_timestamp(text: str) -> datetime:
     return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
 
 
+_ISO_AT_START = re.compile(r"^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2}))")
+_ACCESS_LOG_TIME = re.compile(r"\[(\d{2}/[A-Z][a-z]{2}/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4})\]")
+
+
+def parse_event_time(full_log: str) -> datetime | None:
+    """When the logged event actually happened, read from the raw log line.
+
+    Wazuh's `timestamp` is when the manager *received* the event. After an
+    outage the agent replays buffered events and they all get a fresh
+    timestamp, so the original time only survives in the log line itself.
+    Handles RFC 3339 syslog (Ubuntu 24.04's default) and nginx/Apache access
+    logs; returns None for formats without a year or time zone."""
+    m = _ISO_AT_START.match(full_log)
+    if m:
+        try:
+            return parse_timestamp(m.group(1))
+        except ValueError:
+            return None
+    m = _ACCESS_LOG_TIME.search(full_log)
+    if m:
+        try:
+            return datetime.strptime(m.group(1), "%d/%b/%Y:%H:%M:%S %z")
+        except ValueError:
+            return None
+    return None
+
+
 def _as_list(value) -> list[str]:
     if value is None:
         return []
@@ -81,6 +108,40 @@ class Alert:
     @property
     def severity(self) -> str:
         return level_to_severity(self.level)
+
+    @property
+    def http_status(self) -> str:
+        """HTTP status code for web access log alerts (Wazuh decodes it as data.id)."""
+        status = str((self.raw.get("data") or {}).get("id", ""))
+        return status if status.isdigit() and len(status) == 3 else ""
+
+    @property
+    def failed_web(self) -> bool:
+        """A web request the server refused or failed (4xx/5xx)."""
+        return "web" in self.groups and self.http_status[:1] in ("4", "5")
+
+    @property
+    def chain_tactics(self) -> list[str]:
+        """ATT&CK tactics that say how far an attacker actually got.
+
+        Wazuh tags its web-attack rules with techniques like Process Injection
+        and Exploit Public-Facing Application, so one Nikto scan of 404s
+        "reaches" Initial Access, Privilege Escalation and Lateral Movement.
+        A request the server rejected is an attempt, so it only counts as
+        Reconnaissance."""
+        if self.failed_web:
+            return [t for t in self.mitre_tactics if t == "Reconnaissance"]
+        return self.mitre_tactics
+
+    @property
+    def event_ts(self) -> datetime | None:
+        return parse_event_time(self.full_log)
+
+    @property
+    def delay(self) -> float:
+        """Seconds between the logged event and Wazuh receiving it (0 if unknown)."""
+        ev = self.event_ts
+        return max((self.ts - ev).total_seconds(), 0.0) if ev else 0.0
 
     @property
     def who(self) -> str:

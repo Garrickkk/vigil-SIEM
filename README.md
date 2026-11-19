@@ -34,6 +34,17 @@ the part Wazuh's own UI makes slow: deciding what matters.
     Vigil shows them by time so you can.
   - **Triage that Wazuh doesn't have**: open / acknowledged / closed plus a
     note on every alert, kept in a local SQLite file.
+  - **Counted by the indexer.** Summary pages use OpenSearch aggregations, so
+    a Nikto scan of thousands of requests is one small query, not thousands of
+    downloaded alerts (the first version capped at 5,000 and could overload
+    the indexer on a 16 GB laptop).
+  - **Honest kill chains.** Wazuh tags its web-attack rules with tactics like
+    Privilege Escalation, so a scan of 404s "reached" Lateral Movement.
+    Requests the server rejected are marked as attempts and count only as
+    Reconnaissance.
+  - **Real event times.** After an outage the agent replays buffered events,
+    which Wazuh timestamps on arrival. Vigil reads the original time from the
+    log line and flags delayed events.
   - ATT&CK tactic overview, severity timeline, per-agent and per-rule views,
     CSV export, and a demo mode that works without Wazuh.
 - **`rules/`** *(next)*: custom Wazuh rules and decoders that close the gaps

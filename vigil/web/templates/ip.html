@@ -17,19 +17,22 @@
     <dl class="facts">
       <dt>Activity</dt><dd class="mono">{{ chain.first|ts }} → {{ chain.last|ts('%H:%M:%S') }}
         <span class="muted">({{ (chain.last - chain.first)|duration }})</span></dd>
-      <dt>Alerts</dt><dd class="mono">{{ count }} in {{ chain.steps|length }} steps
+      <dt>Alerts</dt><dd class="mono">{{ "{:,}".format(count) }} in {{ chain.steps|length }} steps{% if chain.attempts %}
+        <span class="muted">({{ "{:,}".format(chain.attempts) }} rejected web requests)</span>{% endif %}
         · <a href="{{ url_for('alerts', src_ip=addr, view='all', range=range_key, status='') }}">see all</a></dd>
       <dt>Targets</dt><dd class="mono">{{ chain.agents|join(', ') or '-' }}</dd>
       <dt>Accounts</dt><dd class="mono">{{ chain.users|join(', ') or '-' }}</dd>
-      <dt>Furthest tactic</dt><dd>{% if chain.furthest %}<b>{{ chain.furthest }}</b> <span class="muted small">(by Wazuh's ATT&amp;CK mapping)</span>{% else %}<span class="muted">no ATT&amp;CK mapping</span>{% endif %}</dd>
+      <dt>Furthest tactic</dt><dd>{% if chain.furthest %}<b>{{ chain.furthest }}</b> <span class="muted small">(Wazuh's ATT&amp;CK mapping; rejected web requests count as Reconnaissance only)</span>{% else %}<span class="muted">no ATT&amp;CK mapping</span>{% endif %}</dd>
       <dt>Logged in?</dt><dd>{% if logged_in %}<b class="yes">yes, {{ logged_in|length }}×</b>{% if after %} <span class="muted small">see "After the login" below</span>{% endif %}{% else %}<span class="muted">no successful login seen</span>{% endif %}</dd>
     </dl>
   </section>
   <section class="card">
     <div class="card-head"><h2>Read this as</h2></div>
-    <p class="desc small">Each step is a run of the same Wazuh rule. Steps are in time order; the green tiles
-      below show which ATT&amp;CK tactics the steps map to. A chain that reaches
-      <b>Initial Access</b> or later deserves a look even if every single alert looks minor.</p>
+    <p class="desc small">Each step is one Wazuh rule: all its alerts from this IP on one host, however
+      they interleave, so a scan of thousands of requests is one line. Steps are in time order; the green tiles below
+      show which ATT&amp;CK tactics they map to. Wazuh tags web-attack rules with tactics like Privilege Escalation,
+      so requests the server rejected (4xx/5xx) are marked <span class="attempt">attempt</span> and only count as
+      Reconnaissance. A chain that reaches <b>Initial Access</b> or later deserves a look.</p>
   </section>
 </div>
 
@@ -53,6 +56,7 @@
           {{ sev(s.severity) }}
           <a href="{{ url_for('alert_detail', alert_id=s.example.id) }}">{{ s.description }}</a>
           {% if s.count > 1 %}<span class="count">×{{ s.count }}</span>{% endif %}
+          {% if s.attempt %}<span class="attempt" title="Every request in this step was rejected by the server (4xx/5xx)">attempt</span>{% endif %}
           {% if s.stage %}<span class="stage">{{ s.stage }}</span>{% endif %}
           {% for m in s.mitre_ids %}<a class="tag" href="{{ m|mitre_url }}" target="_blank" rel="noopener noreferrer">{{ m }}</a>{% endfor %}
           {% if s.users %}<span class="muted small">user {{ s.users|join(', ') }}</span>{% endif %}
@@ -66,9 +70,10 @@
 {% for f in after %}
 <section class="card">
   <div class="card-head"><h2>After the login · {{ f.login.agent_name }}</h2>
-    <span class="muted small">{{ f.login.who }} logged in {{ f.login.ts|ts('%H:%M:%S') }}</span></div>
+    <span class="muted small">{{ f.login.who }} logged in {{ f.login.ts|ts('%H:%M:%S') }}{% if f.logins > 1 %} ({{ f.logins }} logins){% endif %}</span></div>
   <p class="desc small">These alerts have no source IP, so Wazuh can't link them to {{ addr }}. They happened on
-    <span class="mono">{{ f.login.agent_name }}</span> within 30 minutes of the login: likely the same session, but check.</p>
+    <span class="mono">{{ f.login.agent_name }}</span> between the first login and 30 minutes after the last one: likely the same session, but check
+    (your own admin work on that host would show up here too).</p>
   <ol class="chain">
     {% for a in f.alerts %}
       <li>

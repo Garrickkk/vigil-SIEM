@@ -12,7 +12,7 @@
   <section class="card">
     <div class="card-head"><h2>What happened</h2><span class="muted small">{{ a.ts|ago }}</span></div>
     <dl class="facts">
-      <dt>Time</dt><dd class="mono">{{ a.ts|ts }}</dd>
+      <dt>Time</dt><dd class="mono">{% if a.delay > 60 %}{{ a.event_ts|ts }} <span class="delayed" title="The agent buffered this event and sent it later (e.g. the manager was down). Wazuh's own timestamp is when it arrived.">logged · received {{ a.ts|ts('%H:%M:%S') }}, {{ (a.ts - a.event_ts)|duration }} late</span>{% else %}{{ a.ts|ts }}{% endif %}</dd>
       <dt>Source IP</dt><dd>{{ ip(a.src_ip) }}{% if a.src_ip %} <a class="small" href="{{ url_for('investigate', addr=a.src_ip) }}">attack chain →</a>{% endif %}</dd>
       <dt>User</dt><dd class="mono">{{ a.who or '-' }}</dd>
       <dt>Agent</dt><dd class="mono"><a href="{{ url_for('alerts', agent=a.agent_name, status='') }}">{{ a.agent_name or '-' }}</a>
@@ -41,10 +41,9 @@
         </div>
         <label class="sr" for="note">Note</label>
         <textarea id="note" name="note" maxlength="2000" placeholder="Why? (e.g. 'my own nmap test', 'reset deploy's password')">{{ t.note }}</textarea>
-        {% if same_group|length > 1 %}
-          <input type="hidden" name="group_ids" value="{{ same_group|map(attribute='id')|join(',') }}">
+        {% if group_ids|length > 1 %}
           <label class="small muted"><input type="checkbox" name="scope" value="group" checked>
-            apply to all {{ same_group|length }} alerts from this rule, IP and agent</label>
+            apply to all {{ group_ids|length }} alerts from this rule, {{ 'IP' if a.src_ip else 'host' }} and agent (last 7 days)</label>
         {% endif %}
         <button class="primary" type="submit">Save</button>
       </form>
@@ -58,14 +57,15 @@
       <table class="grid compact">
         <tbody>
         {% for o in others %}
-          <tr data-href="{{ url_for('alert_detail', alert_id=o.id) }}">
+          <tr data-href="{{ url_for('alert_detail', alert_id=o.example.id) }}">
             <td>{{ sev(o.severity) }}</td>
-            <td><a href="{{ url_for('alert_detail', alert_id=o.id) }}">{{ o.description }}</a></td>
-            <td class="nowrap muted small">{{ o.ts|ago }}</td></tr>
+            <td><a href="{{ url_for('alert_detail', alert_id=o.example.id) }}">{{ o.description }}</a>
+              {% if o.count > 1 %}<span class="count">×{{ o.count }}</span>{% endif %}</td>
+            <td class="nowrap muted small">{{ o.last|ago }}</td></tr>
         {% else %}<tr><td class="empty">Nothing else from {{ a.src_ip }}.</td></tr>{% endfor %}
         </tbody>
       </table>
-      {% if same_group|length > 1 %}<p class="small"><a href="{{ url_for('alerts', view='all', rule_id=a.rule_id, src_ip=a.src_ip, agent=a.agent_name, range='7d', status='') }}">{{ same_group|length }} alerts in this group →</a></p>{% endif %}
+      {% if group_ids|length > 1 %}<p class="small"><a href="{{ url_for('alerts', view='all', rule_id=a.rule_id, src_ip=a.src_ip, agent=a.agent_name, range='7d', status='') }}">{{ group_ids|length }} alerts in this group →</a></p>{% endif %}
       {% endif %}
     </section>
   </div>

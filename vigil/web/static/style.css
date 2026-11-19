@@ -239,3 +239,5 @@ kbd { font: 11px var(--mono); border: 1px solid var(--line); border-bottom-width
 }
 .filter-chips { margin-bottom: 12px; }
 .yes { color: var(--critical); font-weight: 600; }
+.delayed { color: var(--medium); font-size: 12px; margin-left: 6px; }
+.attempt { font: 11px var(--mono); color: var(--muted); border: 1px dashed var(--line); border-radius: 4px; padding: 0 6px; }

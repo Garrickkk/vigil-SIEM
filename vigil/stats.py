@@ -1,5 +1,10 @@
 """Everything the pages show, computed from a list of alerts.
 
+These functions are the reference implementation. DemoSource uses them
+directly; IndexerSource asks OpenSearch to compute the same numbers with
+aggregations and returns the same shapes, so the templates don't care where
+the numbers came from (tests/test_aggregations.py checks the two agree).
+
 Wazuh raises one alert per matching log line, so a brute force is a dozen
 alerts. Grouping them by (rule, source IP, agent) turns that back into
 "one thing happened, 12 times", which is what you actually triage.
@@ -8,10 +13,14 @@ alerts. Grouping them by (rule, source IP, agent) turns that back into
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Any
 
 from .model import SEVERITIES, SEVERITY_ORDER, TACTIC_ORDER, TACTICS, Alert
+
+FOLLOW_UP_WINDOW = timedelta(minutes=30)
+TOP_N = 6
 
 
 def worst(severities) -> str:
@@ -27,50 +36,59 @@ def combined_status(statuses) -> str:
     return "closed"
 
 
+def status_from_counts(total: int, non_open: int, closed: int) -> str:
+    """Group status from counts: open while any alert is untriaged."""
+    if total > non_open:
+        return "open"
+    return "acknowledged" if non_open > closed else "closed"
+
+
+# ---- groups -------------------------------------------------------------
+
 @dataclass
-class Group:
+class LatestRef:
+    """The newest alert of a group, as much as the tables need."""
+    id: str
+    description: str
+    who: str = ""
+
+
+@dataclass
+class GroupRow:
     rule_id: str
     src_ip: str
     agent_name: str
-    alerts: list[Alert] = field(default_factory=list)   # newest first
+    count: int
+    first_seen: datetime
+    last_seen: datetime
+    severity: str
+    latest: Any            # an Alert or a LatestRef
     status: str = "open"
 
     @property
-    def latest(self) -> Alert:
-        return self.alerts[0]
-
-    @property
-    def first_seen(self) -> datetime:
-        return self.alerts[-1].ts
-
-    @property
-    def last_seen(self) -> datetime:
-        return self.alerts[0].ts
-
-    @property
-    def count(self) -> int:
-        return len(self.alerts)
-
-    @property
-    def severity(self) -> str:
-        return worst(a.severity for a in self.alerts)
-
-    @property
-    def ids(self) -> list[str]:
-        return [a.id for a in self.alerts]
+    def key(self) -> str:
+        return "|".join((self.rule_id, self.src_ip, self.agent_name))
 
 
-def group_alerts(alerts: list[Alert], statuses: dict[str, str]) -> list[Group]:
-    groups: dict[tuple, Group] = {}
-    for a in alerts:   # alerts arrive newest first, so groups keep that order
-        g = groups.get(a.group_key)
-        if g is None:
-            g = groups[a.group_key] = Group(a.rule_id, a.src_ip, a.agent_name)
-        g.alerts.append(a)
-    for g in groups.values():
-        g.status = combined_status(statuses.get(i, "open") for i in g.ids)
-    return sorted(groups.values(), key=lambda g: g.last_seen, reverse=True)
+def group_alerts(alerts: list[Alert], statuses: dict[str, str]) -> list[GroupRow]:
+    by_key: dict[tuple, list[Alert]] = defaultdict(list)
+    for a in alerts:
+        by_key[a.group_key].append(a)
+    rows = []
+    for (rule_id, src_ip, agent), al in by_key.items():
+        al.sort(key=lambda a: a.ts, reverse=True)
+        rows.append(GroupRow(
+            rule_id=rule_id, src_ip=src_ip, agent_name=agent, count=len(al),
+            first_seen=al[-1].ts, last_seen=al[0].ts, severity=worst(a.severity for a in al),
+            latest=al[0], status=combined_status(statuses.get(a.id, "open") for a in al)))
+    return sort_groups(rows)
 
+
+def sort_groups(rows: list[GroupRow]) -> list[GroupRow]:
+    return sorted(sorted(rows, key=lambda g: g.key), key=lambda g: g.last_seen, reverse=True)
+
+
+# ---- timeline -----------------------------------------------------------
 
 @dataclass
 class Bucket:
@@ -82,10 +100,15 @@ class Bucket:
         return sum(self.counts.values())
 
 
+def bucket_edges(since: datetime, until: datetime, n: int) -> list[datetime]:
+    step = max((until - since).total_seconds(), 1) / n
+    return [since + timedelta(seconds=i * step) for i in range(n + 1)]
+
+
 def timeline(alerts: list[Alert], since: datetime, until: datetime, n: int = 48) -> list[Bucket]:
-    span = max((until - since).total_seconds(), 1)
-    step = span / n
-    buckets = [Bucket(since + timedelta(seconds=i * step), dict.fromkeys(SEVERITIES, 0)) for i in range(n)]
+    edges = bucket_edges(since, until, n)
+    step = (edges[1] - edges[0]).total_seconds()
+    buckets = [Bucket(edges[i], dict.fromkeys(SEVERITIES, 0)) for i in range(n)]
     for a in alerts:
         i = int((a.ts - since).total_seconds() // step)
         if 0 <= i < n:
@@ -95,52 +118,44 @@ def timeline(alerts: list[Alert], since: datetime, until: datetime, n: int = 48)
     return buckets
 
 
-def overview(alerts: list[Alert], statuses: dict[str, str]) -> dict:
-    open_alerts = [a for a in alerts if statuses.get(a.id, "open") == "open"]
-    by_sev = Counter(a.severity for a in open_alerts)
+# ---- summaries ------------------------------------------------------------
 
+def severity_counts(alerts: list[Alert]) -> dict[str, int]:
+    c = Counter(a.severity for a in alerts)
+    return {s: c.get(s, 0) for s in SEVERITIES}
+
+
+def tactic_coverage(alerts: list[Alert]) -> list[dict]:
+    """How many alerts touched each ATT&CK tactic, in kill-chain order.
+    Rejected web requests only count towards Reconnaissance (see
+    Alert.chain_tactics)."""
+    counts: Counter[str] = Counter()
+    sev: dict[str, list[str]] = defaultdict(list)
+    for a in alerts:
+        for t in a.chain_tactics:
+            counts[t] += 1
+            sev[t].append(a.severity)
+    return tactic_rows(counts, {t: worst(v) for t, v in sev.items()})
+
+
+def tactic_rows(counts: dict[str, int], severity: dict[str, str]) -> list[dict]:
+    return [{"tactic": t, "count": counts.get(t, 0), "severity": severity.get(t)} for t in TACTICS]
+
+
+def top_ips(alerts: list[Alert]) -> list[dict]:
     ips: dict[str, list[Alert]] = defaultdict(list)
     for a in alerts:
         if a.src_ip:
             ips[a.src_ip].append(a)
-    top_ips = sorted(
-        ({"ip": ip, "count": len(al), "severity": worst(x.severity for x in al),
-          "agents": sorted({x.agent_name for x in al}),
-          "tactics": len({t for x in al for t in x.mitre_tactics})}
-         for ip, al in ips.items()),
-        key=lambda r: (SEVERITY_ORDER[r["severity"]], r["count"]), reverse=True)[:6]
-
-    rules: dict[str, list[Alert]] = defaultdict(list)
-    for a in alerts:
-        rules[a.rule_id].append(a)
-    top_rules = sorted(
-        ({"rule_id": rid, "description": al[0].description, "level": al[0].level,
-          "severity": al[0].severity, "count": len(al)} for rid, al in rules.items()),
-        key=lambda r: (r["level"], r["count"]), reverse=True)[:6]
-
-    return {
-        "total": len(alerts),
-        "open": len(open_alerts),
-        "urgent_open": by_sev.get("critical", 0) + by_sev.get("high", 0),
-        "by_severity": {s: by_sev.get(s, 0) for s in SEVERITIES},
-        "top_ips": top_ips,
-        "top_rules": top_rules,
-        "tactics": tactic_coverage(alerts),
-        "agents": agent_summary(alerts),
-        "latest_ts": alerts[0].ts if alerts else None,
-    }
+    rows = [{"ip": ip, "count": len(al), "severity": worst(x.severity for x in al),
+             "tactics": len({t for x in al for t in x.chain_tactics})}
+            for ip, al in ips.items()]
+    return sort_top_ips(rows)
 
 
-def tactic_coverage(alerts: list[Alert]) -> list[dict]:
-    """How many alerts touched each ATT&CK tactic, in kill-chain order."""
-    counts: Counter[str] = Counter()
-    sev: dict[str, list[str]] = defaultdict(list)
-    for a in alerts:
-        for t in a.mitre_tactics:
-            counts[t] += 1
-            sev[t].append(a.severity)
-    return [{"tactic": t, "count": counts.get(t, 0), "severity": worst(sev[t]) if t in sev else None}
-            for t in TACTICS]
+def sort_top_ips(rows: list[dict]) -> list[dict]:
+    rows = sorted(rows, key=lambda r: r["ip"])
+    return sorted(rows, key=lambda r: (SEVERITY_ORDER[r["severity"]], r["count"]), reverse=True)[:TOP_N]
 
 
 def agent_summary(alerts: list[Alert]) -> list[dict]:
@@ -152,8 +167,13 @@ def agent_summary(alerts: list[Alert]) -> list[dict]:
         rows.append({
             "name": name, "id": al[0].agent_id, "ip": al[0].agent_ip, "count": len(al),
             "severity": worst(x.severity for x in al), "last_seen": max(x.ts for x in al),
-            "by_severity": {s: sum(1 for x in al if x.severity == s) for s in SEVERITIES},
+            "by_severity": severity_counts(al),
         })
+    return sort_agents(rows)
+
+
+def sort_agents(rows: list[dict]) -> list[dict]:
+    rows = sorted(rows, key=lambda r: r["name"])
     return sorted(rows, key=lambda r: (SEVERITY_ORDER[r["severity"]], r["count"]), reverse=True)
 
 
@@ -163,53 +183,90 @@ def rule_summary(alerts: list[Alert]) -> list[dict]:
         rules[a.rule_id].append(a)
     rows = []
     for rid, al in rules.items():
-        first = al[0]
+        first = max(al, key=lambda x: x.ts)
         rows.append({
             "rule_id": rid, "description": first.description, "level": first.level,
             "severity": first.severity, "groups": first.groups, "mitre_ids": first.mitre_ids,
             "count": len(al), "sources": len({x.src_ip for x in al if x.src_ip}),
             "agents": sorted({x.agent_name for x in al}), "last_seen": max(x.ts for x in al),
         })
+    return sort_rules(rows)
+
+
+def sort_rules(rows: list[dict]) -> list[dict]:
+    rows = sorted(rows, key=lambda r: r["rule_id"])
     return sorted(rows, key=lambda r: (r["level"], r["count"]), reverse=True)
 
 
-def attack_chain(alerts: list[Alert]) -> dict:
-    """Lay one source IP's alerts out as a story: chronological, with each
-    step tagged by the earliest kill-chain tactic it maps to."""
-    ordered = sorted(alerts, key=lambda a: a.ts)
+def summarize(alerts: list[Alert], since: datetime, until: datetime, n: int = 48) -> dict:
+    """Everything the overview needs, in one dict."""
+    return {
+        "total": len(alerts),
+        "by_severity": severity_counts(alerts),
+        "latest_ts": max((a.ts for a in alerts), default=None),
+        "top_ips": top_ips(alerts),
+        "top_rules": rule_summary(alerts)[:TOP_N],
+        "tactics": tactic_coverage(alerts),
+        "agents": agent_summary(alerts),
+        "timeline": timeline(alerts, since, until, n),
+    }
+
+
+# ---- attack chain -------------------------------------------------------
+
+def chain_steps(alerts: list[Alert]) -> list[dict]:
+    """One step per (rule, agent): 'Nikto made 4,000 requests' is one line,
+    however the rules interleave."""
+    by_key: dict[tuple, list[Alert]] = defaultdict(list)
+    for a in alerts:
+        by_key[(a.rule_id, a.agent_name)].append(a)
     steps = []
-    for g in _consecutive_runs(ordered):
-        tactics = sorted({t for a in g for t in a.mitre_tactics}, key=lambda t: TACTIC_ORDER.get(t, 99))
-        steps.append({
-            "rule_id": g[0].rule_id, "description": g[0].description,
-            "severity": worst(a.severity for a in g), "count": len(g),
-            "first": g[0].ts, "last": g[-1].ts, "agent": g[0].agent_name,
-            "tactics": tactics, "stage": tactics[0] if tactics else None,
-            "mitre_ids": sorted({m for a in g for m in a.mitre_ids}),
-            "users": sorted({a.user for a in g if a.user}),
-            "example": g[-1],
-        })
+    for (rule_id, agent), al in by_key.items():
+        al.sort(key=lambda a: a.ts)
+        steps.append(make_step(
+            rule_id=rule_id, agent=agent, count=len(al), first=al[0].ts, last=al[-1].ts,
+            severity=worst(a.severity for a in al),
+            tactics={t for a in al for t in a.chain_tactics},
+            attempt=all(a.failed_web for a in al),
+            mitre_ids={m for a in al for m in a.mitre_ids},
+            users={u for a in al for u in (a.user, a.src_user, a.dst_user) if u},
+            example=al[-1]))
+    return sorted(steps, key=lambda s: s["first"])
+
+
+def make_step(*, rule_id, agent, count, first, last, severity, tactics, attempt,
+              mitre_ids, users, example) -> dict:
+    ordered = sorted(tactics, key=lambda t: TACTIC_ORDER.get(t, 99))
+    return {
+        "rule_id": rule_id, "description": example.description, "severity": severity,
+        "count": count, "first": first, "last": last, "agent": agent,
+        "tactics": ordered, "stage": ordered[0] if ordered else None, "attempt": attempt,
+        "mitre_ids": sorted(mitre_ids), "users": sorted(users), "example": example,
+    }
+
+
+def attack_chain(steps: list[dict]) -> dict | None:
+    if not steps:
+        return None
     reached = {t for s in steps for t in s["tactics"]}
     return {
         "steps": steps,
         "tactics": [{"tactic": t, "reached": t in reached} for t in TACTICS],
         "furthest": max(reached, key=lambda t: TACTIC_ORDER[t]) if reached else None,
-        "agents": sorted({a.agent_name for a in alerts}),
-        "users": sorted({a.user for a in alerts if a.user}),
-        "first": ordered[0].ts if ordered else None,
-        "last": ordered[-1].ts if ordered else None,
-        "severity": worst(a.severity for a in alerts),
+        "agents": sorted({s["agent"] for s in steps}),
+        "users": sorted({u for s in steps for u in s["users"]}),
+        "first": min(s["first"] for s in steps),
+        "last": max(s["last"] for s in steps),
+        "severity": worst(s["severity"] for s in steps),
+        "count": sum(s["count"] for s in steps),
+        "attempts": sum(s["count"] for s in steps if s["attempt"]),
     }
 
 
-FOLLOW_UP_WINDOW = timedelta(minutes=30)
-
-
-def logins(alerts: list[Alert]) -> list[Alert]:
-    """Alerts that record a successful login (Wazuh tags them
-    authentication_success, including 40112 'failures followed by a success')."""
-    return [a for a in alerts if "authentication_success" in a.groups
-            or a.rule_id == "40112"]
+def is_login(a: Alert) -> bool:
+    """A successful login (Wazuh tags these authentication_success, and 40112
+    'failures followed by a success' is one too)."""
+    return "authentication_success" in a.groups or a.rule_id == "40112"
 
 
 def follow_up(login_alerts: list[Alert], agent_alerts: dict[str, list[Alert]]) -> list[dict]:
@@ -219,23 +276,18 @@ def follow_up(login_alerts: list[Alert], agent_alerts: dict[str, list[Alert]]) -
     Wazuh can't tie them to the attacker. Showing what the same host logged in
     the next 30 minutes is how an analyst would connect them by hand. It's
     correlation by time, not proof, and the page says so."""
+    per_agent: dict[str, list[Alert]] = defaultdict(list)
+    for login in login_alerts:
+        per_agent[login.agent_name].append(login)
     out = []
-    for login in sorted(login_alerts, key=lambda a: a.ts):
-        until = login.ts + FOLLOW_UP_WINDOW
-        after = [a for a in agent_alerts.get(login.agent_name, [])
-                 if login.ts < a.ts <= until and not a.src_ip]
+    for agent, logins in per_agent.items():
+        # one section per host: hydra's success, 40112 and the attacker's own
+        # ssh session are usually seconds apart and describe one break-in
+        logins.sort(key=lambda a: a.ts)
+        start, until = logins[0].ts, logins[-1].ts + FOLLOW_UP_WINDOW
+        after = [a for a in agent_alerts.get(agent, [])
+                 if start < a.ts <= until and not a.src_ip]
         if after:
-            out.append({"login": login, "alerts": sorted(after, key=lambda a: a.ts)})
-    return out
-
-
-def _consecutive_runs(alerts: list[Alert]) -> list[list[Alert]]:
-    """Merge back-to-back alerts of the same rule on the same agent into one
-    step, so 8 failed logins read as one line in the story."""
-    runs: list[list[Alert]] = []
-    for a in alerts:
-        if runs and runs[-1][-1].rule_id == a.rule_id and runs[-1][-1].agent_name == a.agent_name:
-            runs[-1].append(a)
-        else:
-            runs.append([a])
-    return runs
+            out.append({"login": logins[0], "logins": len(logins),
+                        "alerts": sorted(after, key=lambda a: a.ts)})
+    return sorted(out, key=lambda f: f["login"].ts)

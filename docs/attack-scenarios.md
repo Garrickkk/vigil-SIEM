@@ -104,7 +104,9 @@ sudo -k; sudo -S true <<< "wrong"; sudo -S true <<< "wrong"; sudo -S true <<< "w
 nohup nc -lvnp 4444 >/dev/null 2>&1 &
 ```
 
-Wazuh's agent runs `netstat` every 6 minutes and diffs the output.
+Wazuh's agent runs `netstat` every 6 minutes and diffs the output. On Ubuntu
+24.04 `netstat` isn't installed by default, so this check silently never fires
+unless `net-tools` is installed (`install-agent.sh` now does it).
 
 | Expected Wazuh alerts | Trellis rules |
 |---|---|

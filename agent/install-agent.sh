@@ -38,6 +38,14 @@ WAZUH_MANAGER="$MANAGER" WAZUH_AGENT_NAME="$AGENT_NAME" \
 # An agent newer than the manager can't connect, so don't let apt upgrade it.
 apt-mark hold wazuh-agent >/dev/null
 
+# Wazuh's "listening ports changed" check (rule 533) runs `netstat`, which
+# Ubuntu 24.04 no longer installs. Without it the check fails silently and
+# rule 533 never fires.
+if ! command -v netstat >/dev/null; then
+  echo "==> Installing net-tools (netstat) for the listening-ports check"
+  apt-get install -y -q net-tools >/dev/null
+fi
+
 # Ubuntu 24.04+ logs to journald; auth.log only exists if rsyslog is installed.
 if [[ ! -f /var/log/auth.log ]]; then
   echo "==> Installing rsyslog so /var/log/auth.log exists"

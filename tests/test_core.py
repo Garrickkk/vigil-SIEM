@@ -155,7 +155,7 @@ def test_attack_chain_merges_runs_and_orders_tactics():
           for i in range(3)]
     al.append(alert(id="ok", rule_id="40112", level=12, ts="2026-11-09T10:00:09.000+0700",
                     mitre={"id": ["T1078"], "tactic": ["Initial Access"]}))
-    chain = stats.attack_chain(al)
+    chain = stats.attack_chain(stats.chain_steps(al))
     assert [s["count"] for s in chain["steps"]] == [3, 1]
     assert chain["steps"][0]["stage"] == "Credential Access"   # earliest in kill-chain order
     assert chain["furthest"] == "Lateral Movement"

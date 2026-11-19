@@ -123,12 +123,16 @@ def create_app(source: Source, triage_db: str) -> Flask:
     @app.route("/")
     def overview():
         since, until = window()
-        alerts = fetch(since, until)
-        status = triage.statuses([a.id for a in alerts])
-        groups = stats.group_alerts(alerts, status)
-        buckets = stats.timeline(alerts, since, until)
+        triaged = triage.non_open()
+        s = source.summarize(since, until, Filters())
+        not_open = source.severity_counts(since, until, list(triaged))
+        open_sev = {k: max(s["by_severity"][k] - not_open[k], 0) for k in SEVERITIES}
+        s.update(by_severity=open_sev, open=sum(open_sev.values()),
+                 urgent_open=open_sev["critical"] + open_sev["high"])
+        groups = source.groups(since, until, Filters(), triaged)
+        buckets = s["timeline"]
         return render_template(
-            "overview.html", s=stats.overview(alerts, status), buckets=buckets,
+            "overview.html", s=s, buckets=buckets,
             peak=max((b.total for b in buckets), default=0) or 1,
             since=since, until=until, groups=groups[:10], group_count=len(groups))
 
@@ -138,21 +142,24 @@ def create_app(source: Source, triage_db: str) -> Flask:
         filters = Filters.from_args(request.args)
         status_filter = request.args.get("status", "open")
         view = "all" if request.args.get("view") == "all" else "grouped"
-        items = fetch(since, until, filters)
-        status = triage.statuses([a.id for a in items])
         if view == "grouped":
-            rows = stats.group_alerts(items, status)
-            if status_filter:
-                rows = [r for r in rows if r.status == status_filter]
+            groups = source.groups(since, until, filters, triage.non_open())
+            alert_total = sum(g.count for g in groups)
+            agents = sorted({g.agent_name for g in groups if g.agent_name})
+            rows = [g for g in groups if not status_filter or g.status == status_filter]
+            status = {}
         else:
+            items = fetch(since, until, filters)
+            alert_total = len(items)
+            agents = sorted({a.agent_name for a in items if a.agent_name})
+            status = triage.statuses([a.id for a in items])
             rows = [a for a in items if not status_filter or status[a.id] == status_filter]
         page = max(request.args.get("page", 1, type=int), 1)
         pages = max((len(rows) + PAGE_SIZE - 1) // PAGE_SIZE, 1)
         return render_template(
             "alerts.html", rows=rows[(page - 1) * PAGE_SIZE: page * PAGE_SIZE], total=len(rows),
-            alert_total=len(items), view=view, status=status, status_filter=status_filter,
-            filters=filters, page=min(page, pages), pages=pages,
-            agents=sorted({a.agent_name for a in items}), tactics=TACTICS)
+            alert_total=alert_total, view=view, status=status, status_filter=status_filter,
+            filters=filters, page=min(page, pages), pages=pages, agents=agents, tactics=TACTICS)
 
     @app.route("/alerts.csv")
     def alerts_csv():
@@ -179,22 +186,19 @@ def create_app(source: Source, triage_db: str) -> Flask:
             abort(404)
         until = datetime.now(local_tz)
         since = alert.ts - timedelta(days=7)
-        same_group = []
+        key = "|".join(alert.group_key)
+        group_ids = source.fetch_ids(since, until, Filters.for_group(key))
         others = []
         if alert.src_ip:
-            from_ip = fetch(since, until, Filters(src_ip=alert.src_ip))
-            same_group = [a for a in from_ip if a.group_key == alert.group_key]
-            seen = set()
-            for a in from_ip:   # newest first; one row per other rule
-                if a.rule_id != alert.rule_id and a.rule_id not in seen:
-                    seen.add(a.rule_id)
-                    others.append(a)
+            steps = source.chain(alert.src_ip, since, until)
+            others = sorted((st for st in steps if st["rule_id"] != alert.rule_id),
+                            key=lambda st: st["last"], reverse=True)[:8]
         t = triage.get(alert.id)
         if t["updated_at"]:
             t["updated_at"] = datetime.fromtimestamp(t["updated_at"], local_tz)
         return render_template(
-            "alert.html", a=alert, t=t, same_group=same_group,
-            others=others[:8], raw_json=json.dumps(alert.raw, indent=2, sort_keys=True))
+            "alert.html", a=alert, t=t, group_ids=group_ids, others=others,
+            raw_json=json.dumps(alert.raw, indent=2, sort_keys=True))
 
     @app.route("/alert/<path:alert_id>/triage", methods=["POST"])
     def triage_alert(alert_id):
@@ -203,7 +207,11 @@ def create_app(source: Source, triage_db: str) -> Flask:
             abort(400)
         ids = [alert_id]
         if request.form.get("scope") == "group":
-            ids = [i for i in request.form.get("group_ids", "").split(",") if i] or ids
+            alert = source.get(alert_id)
+            if alert is not None:
+                until = datetime.now(local_tz)
+                ids = source.fetch_ids(alert.ts - timedelta(days=7), until,
+                                       Filters.for_group("|".join(alert.group_key))) or ids
         triage.set(ids, status, note=request.form.get("note", "")[:2000])
         return redirect(url_for("alert_detail", alert_id=alert_id))
 
@@ -218,29 +226,27 @@ def create_app(source: Source, triage_db: str) -> Flask:
             key = request.form.get("range", "24h")
             until = datetime.now(local_tz)
             since = until - RANGES.get(key, RANGES["24h"])
-            for a in fetch(since, until):
-                if "|".join(a.group_key) in keys:
-                    ids.add(a.id)
+            for k in keys:
+                ids.update(source.fetch_ids(since, until, Filters.for_group(k)))
         triage.set(sorted(ids), status)
         return redirect(request.referrer or url_for("alerts"))
 
     @app.route("/ip/<addr>")
     def investigate(addr):
         since, until = window(default="7d")
-        alerts = fetch(since, until, Filters(src_ip=addr))
-        chain = stats.attack_chain(alerts) if alerts else None
+        chain = stats.attack_chain(source.chain(addr, since, until))
+        logged_in = source.logins(addr, since, until) if chain else []
         after = []
-        logged_in = stats.logins(alerts)
         if logged_in:
-            # one fetch per host the attacker got into
             per_agent = {}
             for name in {a.agent_name for a in logged_in}:
-                start = min(a.ts for a in logged_in if a.agent_name == name)
-                per_agent[name] = fetch(start, min(until, max(a.ts for a in logged_in) + stats.FOLLOW_UP_WINDOW),
-                                        Filters(agent=name))
+                times = [a.ts for a in logged_in if a.agent_name == name]
+                per_agent[name] = source.host_activity(
+                    name, min(times), min(until, max(times) + stats.FOLLOW_UP_WINDOW))
             after = stats.follow_up(logged_in, per_agent)
-        return render_template("ip.html", addr=addr, chain=chain, count=len(alerts), after=after,
-                               logged_in=logged_in)
+        return render_template("ip.html", addr=addr, chain=chain,
+                               count=chain["count"] if chain else 0,
+                               after=after, logged_in=logged_in)
 
     @app.route("/investigate")
     def investigate_search():
@@ -252,12 +258,12 @@ def create_app(source: Source, triage_db: str) -> Flask:
     @app.route("/agents")
     def agents():
         since, until = window()
-        return render_template("agents.html", rows=stats.agent_summary(fetch(since, until)))
+        return render_template("agents.html", rows=source.agent_summary(since, until, Filters()))
 
     @app.route("/rules")
     def rules():
         since, until = window()
-        return render_template("rules.html", rows=stats.rule_summary(fetch(since, until)))
+        return render_template("rules.html", rows=source.rule_summary(since, until, Filters()))
 
     return app
 

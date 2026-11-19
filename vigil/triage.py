@@ -39,6 +39,12 @@ class TriageStore:
                 out[row["alert_id"]] = row["status"]
         return out
 
+    def non_open(self) -> dict[str, str]:
+        """Every acknowledged or closed alert: ID -> status. Anything not in
+        here is open, so the aggregated pages only need this (small) list."""
+        rows = self.conn.execute("SELECT alert_id, status FROM triage WHERE status != 'open'")
+        return {r["alert_id"]: r["status"] for r in rows}
+
     def get(self, alert_id: str) -> dict:
         row = self.conn.execute("SELECT * FROM triage WHERE alert_id = ?", (alert_id,)).fetchone()
         return dict(row) if row else {"alert_id": alert_id, "status": "open", "note": "", "updated_at": None}
