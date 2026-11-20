@@ -1,0 +1,135 @@
+<!--
+  Vigil: custom Wazuh rules for the gaps found by running the attack
+  scenarios against Wazuh 4.14.7's default ruleset (docs/comparison.md).
+
+  Deployed to /var/ossec/etc/rules/vigil_rules.xml by rules/vigil_rules.py,
+  which also runs rules/tests.json through wazuh-logtest.
+
+  IDs 100100-100199. Each block says which gap it closes.
+-->
+
+<group name="vigil,">
+
+  <!-- Gap: brute force that succeeds within 7 attempts.
+       Wazuh's 5763 needs 8 failed passwords, and 40112 ("failures followed
+       by a success") only fires after 5763. A password found on guess 2-7
+       logs in as an INFO-level 5715. These two rules count from 5 failures
+       (Trellis uses 5), and are in the authentication_failures group, so
+       Wazuh's own 40112 now fires too when the login follows within 4
+       minutes.
+       Side effect: Wazuh records an event only under the rule that finally
+       alerted, so the failure that triggers 100100 doesn't count towards
+       5763, which then fires on the 9th failure instead of the 8th. -->
+  <rule id="100100" level="8" frequency="5" timeframe="120" ignore="60">
+    <if_matched_sid>5760</if_matched_sid>
+    <same_source_ip />
+    <description>sshd: 5 failed passwords from the same IP (below Wazuh's 8-attempt brute-force threshold).</description>
+    <mitre>
+      <id>T1110.001</id>
+    </mitre>
+    <group>authentication_failures,vigil_ssh_failures,</group>
+  </rule>
+
+  <rule id="100102" level="8" frequency="5" timeframe="120" ignore="60">
+    <if_matched_sid>5710</if_matched_sid>
+    <same_source_ip />
+    <description>sshd: 5 logins with non-existent users from the same IP (password spraying).</description>
+    <mitre>
+      <id>T1110.003</id>
+    </mitre>
+    <group>authentication_failures,vigil_ssh_failures,</group>
+  </rule>
+
+  <!-- 40112 only looks back 4 minutes; Trellis looks back 15. This catches
+       the slower case. When both could fire, 40112 (loaded first) wins and
+       this one stays quiet, so a break-in still raises one alert. -->
+  <rule id="100101" level="12" timeframe="900">
+    <if_sid>5715</if_sid>
+    <if_matched_group>vigil_ssh_failures</if_matched_group>
+    <same_source_ip />
+    <description>sshd: successful login from an IP that failed repeatedly in the last 15 minutes.</description>
+    <mitre>
+      <id>T1110</id>
+      <id>T1078</id>
+    </mitre>
+  </rule>
+
+  <!-- Gap: sudo command content is ignored. Every sudo to root is 5402 at
+       level 3, whether it's `systemctl restart nginx` or a root shell. -->
+  <rule id="100110" level="8">
+    <if_sid>5402</if_sid>
+    <field name="command" type="pcre2">^(/usr)?/bin/(ba|z|da|k|c|tc|fi)?sh( -l| -i| --login)?$|^(/usr)?/bin/su( -| root| - root)?$</field>
+    <description>sudo: $(srcuser) opened an interactive root shell ($(command)).</description>
+    <mitre>
+      <id>T1548.003</id>
+    </mitre>
+  </rule>
+
+  <rule id="100111" level="12">
+    <if_sid>5402</if_sid>
+    <field name="command" type="pcre2">(?i)\b(curl|wget)\b.*\|\s*(sudo\s+)?(/usr)?(/bin/)?(ba|z|da)?sh\b</field>
+    <description>sudo: $(srcuser) ran a downloaded script as root (download piped into a shell).</description>
+    <mitre>
+      <id>T1105</id>
+      <id>T1059.004</id>
+      <id>T1548.003</id>
+    </mitre>
+  </rule>
+
+  <!-- Gap: failed sudo passwords spread over separate commands. Wazuh's 5404
+       only matches sudo's own "3 incorrect password attempts" message, so
+       three commands that each fail once never add up. -->
+  <rule id="100140" level="10" frequency="3" timeframe="120" ignore="60">
+    <if_matched_sid>5401</if_matched_sid>
+    <same_srcuser />
+    <description>sudo: $(srcuser) failed the sudo password 3 times in 2 minutes.</description>
+    <mitre>
+      <id>T1548.003</id>
+      <id>T1110</id>
+    </mitre>
+  </rule>
+
+  <!-- Gap: `usermod -aG sudo <user>` raises nothing (no decoder; see
+       vigil_decoders.xml). Adding an account to an admin group is a classic
+       persistence step after creating a backdoor user. -->
+  <rule id="100120" level="10">
+    <decoded_as>vigil-usermod</decoded_as>
+    <field name="group" type="pcre2">^(sudo|wheel|admin|adm|root|docker|lxd)$</field>
+    <description>User $(dstuser) added to privileged group $(group).</description>
+    <mitre>
+      <id>T1098</id>
+    </mitre>
+    <group>adduser,</group>
+  </rule>
+
+  <!-- Gap: scanner user agents. Wazuh's 31508 only matches a User-Agent that
+       starts with "Nikto"; modern Nikto sends "Mozilla/5.00 (Nikto/...)", and
+       gobuster isn't listed at all. These upgrade Wazuh's own scan/attack
+       burst rules instead of replacing 31101, so 31151's counting of 404s
+       keeps working. -->
+  <rule id="100130" level="11">
+    <if_sid>31151, 31152, 31153</if_sid>
+    <regex type="pcre2">(?i)"[^"]*\b(nikto|gobuster|sqlmap|nmap|dirbuster|dirb|feroxbuster|ffuf|wfuzz|wpscan|nuclei|masscan|zgrab|whatweb|hydra)\b[^"]*"\s*$</regex>
+    <description>Web scan or attack burst from a known security tool (by User-Agent).</description>
+    <mitre>
+      <id>T1595.002</id>
+    </mitre>
+    <group>web_scan,recon,</group>
+  </rule>
+
+  <!-- Wazuh's port check (533) fires on any listening-port change. A
+       netcat-style tool holding a listening port is the classic bind shell
+       or backdoor. Needs netstat on the agent (net-tools, which
+       install-agent.sh installs: Ubuntu 24.04 lacks it and 533 silently never
+       fires). -->
+  <rule id="100150" level="12">
+    <if_sid>533</if_sid>
+    <regex type="pcre2">(?m)\d+/(nc|ncat|netcat|nc\.openbsd|nc\.traditional|socat)\s*$</regex>
+    <description>Listening port opened by a netcat-style tool (possible backdoor).</description>
+    <mitre>
+      <id>T1571</id>
+      <id>T1059</id>
+    </mitre>
+  </rule>
+
+</group>

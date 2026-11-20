@@ -1,37 +1,38 @@
 # Trellis vs Wazuh
 
 Same attacks ([attack-scenarios.md](attack-scenarios.md)), two SIEMs: the
-one I wrote and Wazuh 4.14.7 with its **default ruleset** (no custom rules
-yet; those go in [`rules/`](../rules/)).
+one I wrote and Wazuh 4.14.7 with its **default ruleset**, run in the lab on
+16–17 Nov 2026 (Ubuntu 24.04 victim with nginx, attacker on the same
+host-only network). The last column is the custom rule in
+[`rules/`](../rules/) that closes the gap.
 
-*Expected* comes from reading Wazuh's ruleset source. *Observed* gets
-filled in after running each scenario in the lab. Where they differ is the
-interesting part.
+*Expected* came from reading Wazuh's ruleset source before the run;
+*Observed* is what the lab actually raised.
 
 ## Detection matrix
 
-| Trellis rule | Wazuh built-in equivalent | Expected | Observed |
-|---|---|---|---|
-| `ssh-brute-force` (5 fails / 60 s) | `5763` (8 / 120 s), `5720` | Detected, higher threshold | |
-| `ssh-password-spray` (5 distinct users / 300 s) | `5712` (8 non-existent-user attempts / 120 s) | Partial: counts attempts, not distinct users | |
-| `ssh-brute-force-success` (15 min window) | `40112` (240 s window) | Detected only if the login comes within 4 min | |
-| `ssh-root-login` | `5715` at level 3 | Logged, not flagged | |
-| `sudo-root-shell` | `5402` at level 3 | Logged, can't tell a shell from any other sudo | |
-| `sudo-suspicious-command` | `5402` at level 3 | Gap: no built-in rule looks at the command | |
-| `sudo-password-failures` | `5401`, `5404` | Detected | |
-| `sudo-not-allowed` | `5405` | Detected for "NOT in sudoers" only | |
-| `local-user-created` | `5902` (level 8) | Detected | |
-| `user-added-to-admin-group` | `2961` (gpasswd format only) | Likely gap for `usermod -aG sudo` | |
-| `web-sql-injection` | `31103`, `31152` | Detected; matches the raw URL (no decoding) | |
-| `web-xss` | `31105` | Detected | |
-| `web-path-traversal` | `31104` | Detected | |
-| `web-scanner-user-agent` | `31508` (short list) | Likely gap: only matches a UA that *starts* with `"Nikto`; modern Nikto starts with `Mozilla/5.00` | |
-| `web-404-flood` (20 paths / 60 s) | `31151` (14 errors / 90 s) | Detected | |
-| `web-sensitive-file-probe` | `31101` only | Gap: seen as a plain 404 | |
-| `web-login-brute-force` | `31509` (WordPress/Joomla only) | Gap for a generic login page | |
-| `web-recon-then-ssh-login` | none | Gap: no cross-source correlation by default | |
-| `new-open-port` (network scan diff) | `533` (host netstat diff) | Different approach: host-based, every 6 min | |
-| `risky-service-exposed` | none | Gap: Wazuh doesn't read network scans | |
+| Trellis rule | Wazuh built-in | Expected | Observed (default Wazuh) | Vigil rule |
+|---|---|---|---|---|
+| `ssh-brute-force` (5 fails / 60 s) | `5763` (8 / 120 s) | Detected, higher threshold | ✅ `5763` after 8 failures | `100100` at 5 |
+| `ssh-password-spray` (5 users / 300 s) | `5712` (8 / 120 s) | Partial | ✅ `5712` after 8; **37 alerts for 8 attempts** (one per sshd line) | `100102` at 5 |
+| `ssh-brute-force-success` (15 min) | `40112` (240 s) | Only within 4 min | ❌ **Password found on guess 8 (7 failures): only an INFO `5715`.** With 10 failures first, `40112` fired. | `100100` feeds `40112`; `100101` for 15 min |
+| `ssh-root-login` | `5715` (level 3) | Logged, not flagged | not run (root password login is off by default) | |
+| `sudo-root-shell` | `5402` (level 3) | Can't tell a shell apart | ❌ `sudo -i` = `5402`, level 3 | `100110` |
+| `sudo-suspicious-command` | `5402` (level 3) | Gap | ❌ `curl … \| bash` as root = `5402`, level 3 | `100111` |
+| `sudo-password-failures` | `5401`, `5404` | Detected | ⚠️ `5401` ×12, but **`5404` never fired**: it needs 3 failures in *one* command | `100140` |
+| `sudo-not-allowed` | `5405` | "NOT in sudoers" only | not run | |
+| `local-user-created` | `5902` | Detected | ✅ `5902` + `5901`, and **`40501` CRITICAL** "attacks followed by the addition of an user" | |
+| `user-added-to-admin-group` | `2961` (gpasswd only) | Likely gap | ❌ `usermod -aG sudo` raised nothing: Wazuh has no usermod decoder | `100120` + decoder |
+| `web-sql-injection` | `31103`, `31152` | Detected | ✅ `31103`, `31171`, `31152` | |
+| `web-xss` | `31105` | Detected | ✅ `31105` | |
+| `web-path-traversal` | `31104` | Detected | ✅ `31104`, `31153` | |
+| `web-scanner-user-agent` | `31508` | Likely gap | ❌ **`31508` never fired** for Nikto 2.1.5 (`Mozilla/5.00 (Nikto/…)`) or `gobuster/3.6` | `100130` |
+| `web-404-flood` (20 / 60 s) | `31151` (14 / 90 s) | Detected | ✅ `31151`, but **~380 times for one scan** | (Vigil groups them) |
+| `web-sensitive-file-probe` | `31101` | Gap | ⚠️ plain `31101` 404s; a few `31516` "suspicious URL" | still open |
+| `web-login-brute-force` | `31509` (WP/Joomla) | Gap | not run (no login page on web01) | |
+| `web-recon-then-ssh-login` | none | Gap | ❌ same IP scanned the site, then broke into SSH: no correlating alert (Vigil's attack chain shows it) | still open |
+| `new-open-port` (network scan diff) | `533` (netstat diff) | Host-based, every 6 min | ⚠️ **`533` silently never fired**: Ubuntu 24.04 has no `netstat`. After installing `net-tools`: fired within 6 min | `100150` names netcat; `install-agent.sh` installs net-tools |
+| `risky-service-exposed` | none | Gap | not applicable (Wazuh doesn't read network scans) | |
 
 ## Things Wazuh does that Trellis doesn't
 
@@ -66,5 +67,37 @@ interesting part.
 
 ## Results
 
-*(After running the scenarios: how many of the 20 Trellis detections did
-default Wazuh catch, how fast, and how much noise did each produce?)*
+16 of Trellis's 20 detections were tested (4 weren't applicable to this lab).
+
+| Default Wazuh | Count | Which |
+|---|---|---|
+| Detected | 7 | brute force (8+ tries), spraying (8+), new user, SQLi, XSS, traversal, 404 flood |
+| Partial | 4 | login after brute force (only 8+ failures within 4 min), failed sudo (not across commands), sensitive-file probes (plain 404s), new listening port (needs net-tools) |
+| Missed or level 3 | 5 | root shell, download-and-run as root, admin-group change, scanner user agents, web-recon-then-SSH |
+
+The custom rules in `rules/` close 7 of the 9 partial or missed cases.
+Still open: sensitive-file probes and cross-source correlation (web scan,
+then SSH from the same IP).
+
+### Headline findings
+
+1. **Brute-force blind spot.** Wazuh's "failures followed by a success"
+   (`40112`) depends on its brute-force rule (`5763`), which needs 8
+   failures. An attacker who gets in within 7 guesses (a short targeted
+   wordlist, a leaked password) logs in with an INFO-level alert that looks
+   exactly like a normal login. Reproduced twice: 7 failures, no alert;
+   10 failures, `40112`.
+2. **A silent failure on Ubuntu 24.04.** The default "listening ports
+   changed" check runs `netstat`, which isn't installed. Nothing in the
+   dashboard says so; the rule just never fires.
+3. **Alert volume.** One Nikto run: ~4,500 `31101` and ~380 `31151`. Eight
+   SSH attempts: 37 alerts. Default Wazuh needs grouping or tuning before a
+   person can triage it.
+4. **ATT&CK tags inflate scans.** Web-attack rules carry techniques like
+   Process Injection, so a scan of 404s "reached" Privilege Escalation and
+   Lateral Movement. Vigil counts rejected requests as Reconnaissance only.
+5. **A false positive.** `31106` "web attack returned 200" fired against a
+   static nginx page that answers every URL with its homepage.
+6. **Where Wazuh beat Trellis:** `40501` (CRITICAL) tied the attack to the
+   new backdoor account with no source IP; `5403` flagged an account using
+   sudo for the first time; `2902` flagged package installs.

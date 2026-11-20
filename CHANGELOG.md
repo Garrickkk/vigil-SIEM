@@ -2,6 +2,12 @@
 
 Versions follow 0.MINOR.PATCH until 1.0: minor = feature, patch = fix or docs.
 
+## 0.3.0
+
+- rules/: 9 custom Wazuh rules and a usermod decoder for gaps found in the lab
+- rules/vigil_rules.py: deploy, test (wazuh-logtest) and remove
+- comparison.md filled with observed results
+
 ## 0.2.0
 
 - Summary pages counted by OpenSearch aggregations (no 5,000-alert cap)

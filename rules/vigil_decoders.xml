@@ -1,0 +1,19 @@
+<!--
+  Vigil custom decoders. Deployed to /var/ossec/etc/decoders/vigil_decoders.xml
+  by rules/vigil_rules.py.
+
+  Wazuh 4.14 has no decoder for usermod, so "add 'support' to group 'sudo'"
+  (what `usermod -aG sudo support` logs) never reaches a rule.
+-->
+
+<decoder name="vigil-usermod">
+  <program_name>^usermod$</program_name>
+</decoder>
+
+<!-- "add 'support' to group 'sudo'". The matching "... to shadow group ..."
+     line is left undecoded on purpose, so one usermod raises one alert. -->
+<decoder name="vigil-usermod-group">
+  <parent>vigil-usermod</parent>
+  <regex type="pcre2">^add '([^']+)' to group '([^']+)'</regex>
+  <order>dstuser, group</order>
+</decoder>

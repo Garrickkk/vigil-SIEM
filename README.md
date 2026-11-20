@@ -47,7 +47,7 @@ the part Wazuh's own UI makes slow: deciding what matters.
     log line and flags delayed events.
   - ATT&CK tactic overview, severity timeline, per-agent and per-rule views,
     CSV export, and a demo mode that works without Wazuh.
-- **`rules/`** *(next)*: custom Wazuh rules and decoders that close the gaps
+- **`rules/`**: custom Wazuh rules and decoders (with logtest test cases) that close the gaps
   the [comparison](docs/comparison.md) finds in Wazuh's default ruleset,
   each with test logs.
 - **`docs/`**: lab setup, the attack scenarios, and a
