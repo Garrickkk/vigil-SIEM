@@ -46,33 +46,29 @@ if ! command -v netstat >/dev/null; then
   apt-get install -y -q net-tools >/dev/null
 fi
 
-# Ubuntu 24.04+ logs to journald; auth.log only exists if rsyslog is installed.
-if [[ ! -f /var/log/auth.log ]]; then
-  echo "==> Installing rsyslog so /var/log/auth.log exists"
-  apt-get install -y -q rsyslog >/dev/null
-  systemctl enable --now rsyslog
-fi
+# Add a log source only if the packaged config doesn't already read it.
+# Reading one event from two places doubles every count (and halves every
+# threshold): on Ubuntu 24.04 the agent already reads the systemd journal,
+# which holds every sshd/sudo/useradd message, and rsyslog writes the same
+# messages to /var/log/auth.log. auth.log is also worse: rsyslog folds
+# repeats into "message repeated 5 times: [...]", hiding failed logins.
+reads() { grep -q "<location>$1</location>" "$OSSEC_CONF"; }
 
-if ! grep -qF "$MARKER" "$OSSEC_CONF"; then
-  echo "==> Adding extra log sources"
-  # ossec.conf may contain several <ossec_config> blocks; appending one keeps
-  # the packaged defaults untouched.
-  {
-    echo ""
-    echo "$MARKER"
-    echo "<ossec_config>"
-    echo "  <localfile>"
-    echo "    <log_format>syslog</log_format>"
-    echo "    <location>/var/log/auth.log</location>"
-    echo "  </localfile>"
-    if [[ -d /var/log/nginx ]]; then
-      echo "  <localfile>"
-      echo "    <log_format>apache</log_format>"
-      echo "    <location>/var/log/nginx/access.log</location>"
-      echo "  </localfile>"
-    fi
-    echo "</ossec_config>"
-  } >> "$OSSEC_CONF"
+extra=""
+if ! reads journald && ! reads /var/log/auth.log && [[ -f /var/log/auth.log ]]; then
+  extra+="  <localfile>\n    <log_format>syslog</log_format>\n    <location>/var/log/auth.log</location>\n  </localfile>\n"
+fi
+if [[ -f /var/log/nginx/access.log ]] && ! reads /var/log/nginx/access.log; then
+  extra+="  <localfile>\n    <log_format>apache</log_format>\n    <location>/var/log/nginx/access.log</location>\n  </localfile>\n"
+fi
+if [[ -n "$extra" ]] && ! grep -qF "$MARKER" "$OSSEC_CONF"; then
+  echo "==> Adding log sources the default config doesn't cover"
+  printf '\n%s\n<ossec_config>\n%b</ossec_config>\n' "$MARKER" "$extra" >> "$OSSEC_CONF"
+fi
+echo "==> Log sources:"
+grep -E "<location>" "$OSSEC_CONF" | sed 's/^ */    /'
+if [[ $(grep -c "<location>/var/log/nginx/access.log</location>" "$OSSEC_CONF") -gt 1 ]]; then
+  echo "    warning: nginx access.log is read twice; remove one <localfile> block" >&2
 fi
 
 systemctl daemon-reload

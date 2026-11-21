@@ -83,16 +83,23 @@ then SSH from the same IP).
 
 1. **Brute-force blind spot.** Wazuh's "failures followed by a success"
    (`40112`) depends on its brute-force rule (`5763`), which needs 8
-   failures. An attacker who gets in within 7 guesses (a short targeted
-   wordlist, a leaked password) logs in with an INFO-level alert that looks
-   exactly like a normal login. Reproduced twice: 7 failures, no alert;
-   10 failures, `40112`.
+   failed-password events. A login after fewer (a short targeted wordlist,
+   a leaked password) is an INFO-level `5715`, identical to a normal login.
+   Confirmed with `wazuh-logtest`. *Correction:* the first lab run that
+   seemed to show this was compromised: one login event was lost when Docker
+   crashed, and every event was being read twice (see 3). Re-test pending.
 2. **A silent failure on Ubuntu 24.04.** The default "listening ports
    changed" check runs `netstat`, which isn't installed. Nothing in the
    dashboard says so; the rule just never fires.
-3. **Alert volume.** One Nikto run: ~4,500 `31101` and ~380 `31151`. Eight
-   SSH attempts: 37 alerts. Default Wazuh needs grouping or tuning before a
-   person can triage it.
+3. **Every event was counted twice, and that was my setup.** On Ubuntu 24.04
+   the agent already reads the systemd journal; `install-agent.sh` also
+   added `/var/log/auth.log` (the same messages, via rsyslog) and a second
+   copy of the nginx log. Counts in the first runs (~4,500 `31101`, 37 alerts
+   for 8 SSH attempts) are roughly double, and thresholds fired at about
+   half the real attempts. Fixed in `install-agent.sh`; scenarios 1, 3 and 4
+   need re-running for real counts. Bonus trap: rsyslog folds repeats into
+   `message repeated 5 times: [...]`, so a SIEM reading only auth.log sees
+   one failed login where there were five. Read the journal.
 4. **ATT&CK tags inflate scans.** Web-attack rules carry techniques like
    Process Injection, so a scan of 404s "reached" Privilege Escalation and
    Lateral Movement. Vigil counts rejected requests as Reconnaissance only.

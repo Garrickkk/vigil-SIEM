@@ -2,6 +2,11 @@
 
 Versions follow 0.MINOR.PATCH until 1.0: minor = feature, patch = fix or docs.
 
+## 0.3.2
+
+- install-agent.sh only adds log sources the agent doesn't already read (journald + auth.log doubled every count)
+- Corrected findings affected by the double counting
+
 ## 0.3.1
 
 - Sudo rules hang off 5400: Wazuh's first-time-sudo rule hid everything under 5402
