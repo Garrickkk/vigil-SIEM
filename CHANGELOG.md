@@ -2,6 +2,11 @@
 
 Versions follow 0.MINOR.PATCH until 1.0: minor = feature, patch = fix or docs.
 
+## 0.3.1
+
+- Sudo rules hang off 5400: Wazuh's first-time-sudo rule hid everything under 5402
+- vigil_rules.py sends bytes (Windows added \r to every log line) and reads logtest's stderr
+
 ## 0.3.0
 
 - rules/: 9 custom Wazuh rules and a usermod decoder for gaps found in the lab

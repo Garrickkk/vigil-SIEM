@@ -49,6 +49,11 @@ it works end to end, with real timing:
 
 ## Known trade-offs
 
+- **The sudo rules sit next to Wazuh's first-time-sudo rule (`5403`), not
+  under `5402`.** `5403` is checked before `5402`, so on a user's first sudo
+  nothing under `5402` runs. Found by `tests.json`: the root-shell case
+  returned `5403` until the rules moved. When `100110`/`100111` fire on a
+  first sudo, that event isn't also reported as "first time".
 - **The 5th failure is reported as `100100`, not `5760`.** Wazuh counts an
   event only under the rule that finally alerted, so `5763` now fires on
   the 9th failure instead of the 8th. `tests.json` checks this.

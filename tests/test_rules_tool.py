@@ -48,11 +48,20 @@ Type one log per line
 
 
 def test_logtest_output_parsing(monkeypatch):
+    sent = {}
+
     class P:
-        stdout = SAMPLE
+        args = []
+        stdout = b""
+        stderr = SAMPLE.encode()   # the 4.x Python tool may print here
         returncode = 0
-    monkeypatch.setattr(vigil_rules.subprocess, "run", lambda *a, **k: P())
+
+    def run(cmd, **kw):
+        sent["input"] = kw.get("input")
+        return P()
+    monkeypatch.setattr(vigil_rules.subprocess, "run", run)
     assert vigil_rules.logtest("mgr", ["a", "b", "c"]) == ["5760", None, "100110"]
+    assert sent["input"] == b"a\nb\nc\n"   # bytes: no \r added on Windows
 
 
 def test_expand_counts_across_steps():

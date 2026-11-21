@@ -30,8 +30,14 @@ FILES = {
 
 
 def docker(*args: str, input_text: str | None = None, check: bool = True) -> subprocess.CompletedProcess:
-    proc = subprocess.run(["docker", *args], input=input_text, capture_output=True,
-                          text=True, encoding="utf-8", errors="replace")
+    # Bytes, not text mode: on Windows, text mode turns every "\n" sent to
+    # stdin into "\r\n", and the "\r" ends up inside Wazuh's decoded fields
+    # (a command of "/bin/bash\r" no longer matches "...bash$").
+    raw = subprocess.run(["docker", *args], capture_output=True,
+                         input=input_text.encode("utf-8") if input_text is not None else None)
+    proc = subprocess.CompletedProcess(raw.args, raw.returncode,
+                                       raw.stdout.decode("utf-8", "replace"),
+                                       raw.stderr.decode("utf-8", "replace"))
     if check and proc.returncode != 0:
         sys.exit(f"docker {' '.join(args[:3])}… failed:\n{proc.stderr.strip() or proc.stdout.strip()}")
     return proc
@@ -86,15 +92,23 @@ def remove(quiet: bool = False) -> None:
 def logtest(container: str, lines: list[str]) -> list[str | None]:
     """Rule ID that fired for each line, in one logtest session (so
     frequency/correlation rules see the earlier lines)."""
-    out = docker("exec", "-i", container, "/var/ossec/bin/wazuh-logtest",
-                 input_text="\n".join(lines) + "\n").stdout
-    chunks = out.split("**Phase 1: Completed pre-decoding.")[1:]
+    proc = docker("exec", "-i", container, "/var/ossec/bin/wazuh-logtest",
+                  input_text="\n".join(lines) + "\n", check=False)
+    # wazuh-logtest (a Python tool in 4.x) may print results on stderr
+    out = proc.stdout + "\n" + proc.stderr
+    chunks = re.split(r"\*\*Phase 1: Completed pre-decoding\.?", out)[1:]
+    if not chunks:
+        global RAW_OUTPUT
+        RAW_OUTPUT = out.strip()
     ids: list[str | None] = []
     for chunk in chunks:
-        phase3 = chunk.split("**Phase 3: Completed filtering (rules).")
-        m = re.search(r"id: '(\d+)'", phase3[1]) if len(phase3) > 1 else None
+        phase3 = re.split(r"\*\*Phase 3: Completed filtering \(rules\)\.?", chunk)
+        m = re.search(r"\bid: '?(\d+)'?", phase3[1]) if len(phase3) > 1 else None
         ids.append(m.group(1) if m else None)
     return ids
+
+
+RAW_OUTPUT = ""
 
 
 def expand(steps: list[dict]) -> tuple[list[str], list[tuple[int, int, dict]]]:
@@ -138,6 +152,12 @@ def test(pattern: str = "") -> None:
             for p in problems:
                 print(f"        {p}")
             print(f"        rule per line: {got}")
+            if not got and RAW_OUTPUT:
+                print("        raw logtest output (first 25 lines):")
+                for line in RAW_OUTPUT.splitlines()[:25]:
+                    print(f"        | {line}")
+                print("\nStopping: logtest output couldn't be read. Paste the output above to fix the parser.")
+                sys.exit(2)
         else:
             print(f"  ok    {case['name']}")
     print(f"\n{'all passed' if not failed else f'{failed} failed'}"

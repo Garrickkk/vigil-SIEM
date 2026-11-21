@@ -55,10 +55,15 @@
   </rule>
 
   <!-- Gap: sudo command content is ignored. Every sudo to root is 5402 at
-       level 3, whether it's `systemctl restart nginx` or a root shell. -->
+       level 3, whether it's `systemctl restart nginx` or a root shell.
+       These hang off 5400 (the sudo parent), not 5402: 5403 "First time user
+       executed sudo" (level 4) is a sibling of 5402 and is checked first, so
+       on a user's first sudo nothing under 5402 is ever evaluated. That first
+       sudo is exactly an attacker's first move on a compromised account. -->
   <rule id="100110" level="8">
-    <if_sid>5402</if_sid>
-    <field name="command" type="pcre2">^(/usr)?/bin/(ba|z|da|k|c|tc|fi)?sh( -l| -i| --login)?$|^(/usr)?/bin/su( -| root| - root)?$</field>
+    <if_sid>5400</if_sid>
+    <regex> ; USER=root ; COMMAND=| ; USER=root ; TSID=\S+ ; COMMAND=</regex>
+    <field name="command" type="pcre2">^(/usr)?/bin/(ba|z|da|k|c|tc|fi)?sh( -l| -i| --login)?\s*$|^(/usr)?/bin/su( -| root| - root)?\s*$</field>
     <description>sudo: $(srcuser) opened an interactive root shell ($(command)).</description>
     <mitre>
       <id>T1548.003</id>
@@ -66,7 +71,8 @@
   </rule>
 
   <rule id="100111" level="12">
-    <if_sid>5402</if_sid>
+    <if_sid>5400</if_sid>
+    <regex> ; USER=root ; COMMAND=| ; USER=root ; TSID=\S+ ; COMMAND=</regex>
     <field name="command" type="pcre2">(?i)\b(curl|wget)\b.*\|\s*(sudo\s+)?(/usr)?(/bin/)?(ba|z|da)?sh\b</field>
     <description>sudo: $(srcuser) ran a downloaded script as root (download piped into a shell).</description>
     <mitre>

@@ -98,6 +98,12 @@ then SSH from the same IP).
    Lateral Movement. Vigil counts rejected requests as Reconnaissance only.
 5. **A false positive.** `31106` "web attack returned 200" fired against a
    static nginx page that answers every URL with its homepage.
-6. **Where Wazuh beat Trellis:** `40501` (CRITICAL) tied the attack to the
+6. **The first sudo hides everything else.** `5403` "First time user
+   executed sudo" is checked before `5402` "sudo to ROOT", so on an
+   account's first sudo no rule under `5402` runs at all, including custom
+   ones. For a freshly compromised account, the attacker's first root shell
+   is a level-4 "first time" event. Vigil's sudo rules hang off the parent
+   (`5400`) for this reason; `wazuh-logtest` caught it.
+7. **Where Wazuh beat Trellis:** `40501` (CRITICAL) tied the attack to the
    new backdoor account with no source IP; `5403` flagged an account using
    sudo for the first time; `2902` flagged package installs.
