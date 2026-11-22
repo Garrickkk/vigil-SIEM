@@ -13,10 +13,10 @@
   <!-- Gap: brute force that succeeds within 7 attempts.
        Wazuh's 5763 needs 8 failed passwords, and 40112 ("failures followed
        by a success") only fires after 5763. A password found on guess 2-7
-       logs in as an INFO-level 5715. These two rules count from 5 failures
-       (Trellis uses 5), and are in the authentication_failures group, so
-       Wazuh's own 40112 now fires too when the login follows within 4
-       minutes.
+       logs in as an INFO-level 5715. These count from 5 failures (Trellis
+       uses 5); 100101 below turns the login that follows into a level-12
+       alert. (They're also in the authentication_failures group, so 40112
+       can use them; in the lab 100101 is the one that fired.)
        Side effect: Wazuh records an event only under the rule that finally
        alerted, so the failure that triggers 100100 doesn't count towards
        5763, which then fires on the 9th failure instead of the 8th. -->
@@ -40,9 +40,9 @@
     <group>authentication_failures,vigil_ssh_failures,</group>
   </rule>
 
-  <!-- 40112 only looks back 4 minutes; Trellis looks back 15. This catches
-       the slower case. When both could fire, 40112 (loaded first) wins and
-       this one stays quiet, so a break-in still raises one alert. -->
+  <!-- Login after repeated failures, looking back 15 minutes like Trellis
+       (40112 looks back 4). Wazuh raises one alert per event, so a break-in
+       shows up once, as either 100101 or 40112. -->
   <rule id="100101" level="12" timeframe="900">
     <if_sid>5715</if_sid>
     <if_matched_group>vigil_ssh_failures</if_matched_group>

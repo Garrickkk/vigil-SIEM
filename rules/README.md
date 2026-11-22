@@ -6,9 +6,9 @@ found in Wazuh 4.14.7's default ruleset. Results and reasoning:
 
 | Rule | Level | Closes the gap |
 |---|---|---|
-| `100100` | 8 | 5 failed SSH passwords from one IP (Wazuh waits for 8). In the `authentication_failures` group, so Wazuh's own `40112` now fires for a login after 5–7 failures. |
+| `100100` | 8 | 5 failed SSH passwords from one IP (Wazuh waits for 8). |
 | `100102` | 8 | 5 logins with made-up usernames from one IP (password spraying; Wazuh waits for 8). |
-| `100101` | 12 | Successful login from an IP that failed repeatedly in the last 15 minutes (`40112` only looks back 4). |
+| `100101` | 12 | Successful login from an IP that failed repeatedly in the last 15 minutes. Lab: 5 wrong guesses then a login gave `100100` + `100101`; default Wazuh gave only an INFO `5715`. |
 | `100110` | 8 | sudo opening an interactive root shell (`sudo -i`, `sudo bash`, `sudo su`). |
 | `100111` | 12 | sudo running a downloaded script (`curl … \| bash`). |
 | `100140` | 10 | 3 failed sudo passwords in 2 minutes, across separate commands (`5404` needs all 3 in one). |
@@ -42,7 +42,7 @@ restarts and `vigil.ps1 down`/`up` (but not `vigil.ps1 reset`).
 `logtest` proves a rule matches a log line. Re-running the scenarios proves
 it works end to end, with real timing:
 
-- Scenario 4 with the original 8-word list (`sunshine` 8th): expect `100100`, then `40112`.
+- Scenario 4 with 5 wrong guesses before the password: expect `100100`, then `100101` (confirmed 17 Nov).
 - Scenario 5: `100110`, `100111`, `100120`, `100140`.
 - Scenario 1 (gobuster): `100130` instead of plain `31151`.
 - Scenario 6: `100150` instead of `533` (that one can only be tested live).

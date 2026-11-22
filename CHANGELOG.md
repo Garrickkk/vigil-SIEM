@@ -2,6 +2,10 @@
 
 Versions follow 0.MINOR.PATCH until 1.0: minor = feature, patch = fix or docs.
 
+## 0.3.3
+
+- Brute-force blind spot re-tested with single counting; docs say 100101 fires, not 40112
+
 ## 0.3.2
 
 - install-agent.sh only adds log sources the agent doesn't already read (journald + auth.log doubled every count)

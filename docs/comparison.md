@@ -15,7 +15,7 @@ host-only network). The last column is the custom rule in
 |---|---|---|---|---|
 | `ssh-brute-force` (5 fails / 60 s) | `5763` (8 / 120 s) | Detected, higher threshold | ✅ `5763` after 8 failures | `100100` at 5 |
 | `ssh-password-spray` (5 users / 300 s) | `5712` (8 / 120 s) | Partial | ✅ `5712` after 8; **37 alerts for 8 attempts** (one per sshd line) | `100102` at 5 |
-| `ssh-brute-force-success` (15 min) | `40112` (240 s) | Only within 4 min | ❌ **Password found on guess 8 (7 failures): only an INFO `5715`.** With 10 failures first, `40112` fired. | `100100` feeds `40112`; `100101` for 15 min |
+| `ssh-brute-force-success` (15 min) | `40112` (240 s) | Only within 4 min | ❌ **3 wrong guesses then a login: only an INFO `5715`** (needs 8 failures before `40112` can fire) | `100100` + `100101` (lab: fired) |
 | `ssh-root-login` | `5715` (level 3) | Logged, not flagged | not run (root password login is off by default) | |
 | `sudo-root-shell` | `5402` (level 3) | Can't tell a shell apart | ❌ `sudo -i` = `5402`, level 3 | `100110` |
 | `sudo-suspicious-command` | `5402` (level 3) | Gap | ❌ `curl … \| bash` as root = `5402`, level 3 | `100111` |
@@ -85,9 +85,11 @@ then SSH from the same IP).
    (`40112`) depends on its brute-force rule (`5763`), which needs 8
    failed-password events. A login after fewer (a short targeted wordlist,
    a leaked password) is an INFO-level `5715`, identical to a normal login.
-   Confirmed with `wazuh-logtest`. *Correction:* the first lab run that
-   seemed to show this was compromised: one login event was lost when Docker
-   crashed, and every event was being read twice (see 3). Re-test pending.
+   Confirmed in the lab after fixing the double counting (see 3): 3 wrong
+   guesses then a login gave only `5715`; with Vigil's rules, 5 wrong
+   guesses then a login gave `100100` and `100101` (level 12). *Correction:*
+   an earlier run that seemed to show this was compromised (a login event
+   lost in a Docker crash, and every event read twice).
 2. **A silent failure on Ubuntu 24.04.** The default "listening ports
    changed" check runs `netstat`, which isn't installed. Nothing in the
    dashboard says so; the rule just never fires.
