@@ -75,7 +75,8 @@ host-only network). The last column is the custom rule in
 | Partial | 4 | login after brute force (only 8+ failures within 4 min), failed sudo (not across commands), sensitive-file probes (plain 404s), new listening port (needs net-tools) |
 | Missed or level 3 | 5 | root shell, download-and-run as root, admin-group change, scanner user agents, web-recon-then-SSH |
 
-The custom rules in `rules/` close 7 of the 9 partial or missed cases.
+The custom rules in `rules/` close 7 of the 9 partial or missed cases, and
+each one was confirmed firing in the lab against a re-run of the attack.
 Still open: sensitive-file probes and cross-source correlation (web scan,
 then SSH from the same IP).
 

@@ -2,6 +2,10 @@
 
 Versions follow 0.MINOR.PATCH until 1.0: minor = feature, patch = fix or docs.
 
+## 0.3.4
+
+- Every custom rule confirmed against re-run attacks
+
 ## 0.3.3
 
 - Brute-force blind spot re-tested with single counting; docs say 100101 fires, not 40112

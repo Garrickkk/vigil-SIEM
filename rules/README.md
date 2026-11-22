@@ -16,6 +16,12 @@ found in Wazuh 4.14.7's default ruleset. Results and reasoning:
 | `100130` | 11 | A scan/attack burst whose User-Agent is a known tool: Nikto, gobuster, sqlmap and others. |
 | `100150` | 12 | A listening port held by netcat/socat (a bind shell or backdoor). |
 
+**All nine rules have fired in the lab** (17 Nov 2026) against real attacks
+from the attacker VM: `100100`/`100101` (hydra, 5 wrong guesses then the
+password), `100110`, `100111`, `100120`, `100140` (privilege escalation as
+`deploy`), `100150` (`nc -lvnp 4444`, ~6 minutes later), and `100102`/`100130`
+via `wazuh-logtest` with real log lines.
+
 ## Deploy and test
 
 With Wazuh running (`.\setup\vigil.ps1 up`):
@@ -42,10 +48,10 @@ restarts and `vigil.ps1 down`/`up` (but not `vigil.ps1 reset`).
 `logtest` proves a rule matches a log line. Re-running the scenarios proves
 it works end to end, with real timing:
 
-- Scenario 4 with 5 wrong guesses before the password: expect `100100`, then `100101` (confirmed 17 Nov).
+- Scenario 4 with 5 wrong guesses before the password: `100100`, then `100101`.
 - Scenario 5: `100110`, `100111`, `100120`, `100140`.
 - Scenario 1 (gobuster): `100130` instead of plain `31151`.
-- Scenario 6: `100150` instead of `533` (that one can only be tested live).
+- Scenario 6: `100150` instead of `533` (can only be tested live).
 
 ## Known trade-offs
 
