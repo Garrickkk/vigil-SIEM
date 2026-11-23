@@ -73,16 +73,18 @@
     <span class="muted small">{{ f.login.who }} logged in {{ f.login.ts|ts('%H:%M:%S') }}{% if f.logins > 1 %} ({{ f.logins }} logins){% endif %}</span></div>
   <p class="desc small">These alerts have no source IP, so Wazuh can't link them to {{ addr }}. They happened on
     <span class="mono">{{ f.login.agent_name }}</span> between the first login and 30 minutes after the last one: likely the same session, but check
-    (your own admin work on that host would show up here too).</p>
+    (your own admin work on that host would show up here too). Grouped by rule; configuration-scan and
+    agent-status alerts are left out.</p>
   <ol class="chain">
-    {% for a in f.alerts %}
+    {% for r in f.steps %}
       <li>
-        <span class="node n-{{ a.severity }}"></span>
-        <div class="when">{{ a.ts|ts('%H:%M:%S') }} · +{{ (a.ts - f.login.ts)|duration }}</div>
-        <div class="what">{{ sev(a.severity) }} <a href="{{ url_for('alert_detail', alert_id=a.id) }}">{{ a.description }}</a>
-          {% if a.who %}<span class="muted small">{{ a.who }}</span>{% endif %}
-          {% for m in a.mitre_ids %}<a class="tag" href="{{ m|mitre_url }}" target="_blank" rel="noopener noreferrer">{{ m }}</a>{% endfor %}</div>
-        <div class="raw">{{ a.full_log|truncate(240) }}</div>
+        <span class="node n-{{ r.severity }}"></span>
+        <div class="when">+{{ (r.first - f.login.ts)|duration }}{% if r.count > 1 %} – +{{ (r.last - f.login.ts)|duration }}{% endif %} · {{ r.first|ts('%H:%M:%S') }}</div>
+        <div class="what">{{ sev(r.severity) }} <a href="{{ url_for('alert_detail', alert_id=r.example.id) }}">{{ r.description }}</a>
+          {% if r.count > 1 %}<span class="count">×{{ r.count }}</span>{% endif %}
+          {% if r.who %}<span class="muted small">{{ r.who|join(', ') }}</span>{% endif %}
+          {% for m in r.mitre_ids %}<a class="tag" href="{{ m|mitre_url }}" target="_blank" rel="noopener noreferrer">{{ m }}</a>{% endfor %}</div>
+        <div class="raw">{{ r.example.full_log|truncate(240) }}</div>
       </li>
     {% endfor %}
   </ol>

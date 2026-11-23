@@ -112,8 +112,13 @@
        starts with "Nikto"; modern Nikto sends "Mozilla/5.00 (Nikto/...)", and
        gobuster isn't listed at all. These upgrade Wazuh's own scan/attack
        burst rules instead of replacing 31101, so 31151's counting of 404s
-       keeps working. -->
-  <rule id="100130" level="11">
+       keeps working.
+       ignore="120": 31151 refires every 14 errors, and without a cool-down
+       one gobuster run raised 763 of these. Now the tool is named at most
+       once every 2 minutes; plain 31151 covers the gaps. (Wazuh's ignore is
+       per rule, not per IP, so a second scanner in the same 2 minutes shows
+       as 31151.) -->
+  <rule id="100130" level="11" ignore="120">
     <if_sid>31151, 31152, 31153</if_sid>
     <regex type="pcre2">(?i)"[^"]*\b(nikto|gobuster|sqlmap|nmap|dirbuster|dirb|feroxbuster|ffuf|wfuzz|wpscan|nuclei|masscan|zgrab|whatweb|hydra)\b[^"]*"\s*$</regex>
     <description>Web scan or attack burst from a known security tool (by User-Agent).</description>

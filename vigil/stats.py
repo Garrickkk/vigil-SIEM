@@ -286,8 +286,37 @@ def follow_up(login_alerts: list[Alert], agent_alerts: dict[str, list[Alert]]) -
         logins.sort(key=lambda a: a.ts)
         start, until = logins[0].ts, logins[-1].ts + FOLLOW_UP_WINDOW
         after = [a for a in agent_alerts.get(agent, [])
-                 if start < a.ts <= until and not a.src_ip]
+                 if start < a.ts <= until and not a.src_ip and not _background(a)]
         if after:
             out.append({"login": logins[0], "logins": len(logins),
-                        "alerts": sorted(after, key=lambda a: a.ts)})
+                        "alerts": sorted(after, key=lambda a: a.ts),
+                        "steps": host_steps(after)})
     return sorted(out, key=lambda f: f["login"].ts)
+
+
+# Alerts that describe the host, not anyone's actions: configuration
+# assessment (CIS benchmark) results and the agent/manager's own status.
+_BACKGROUND_GROUPS = {"sca", "ossec_agent_status"}
+_BACKGROUND_RULES = {"501", "502", "503", "504", "506"}
+
+
+def _background(a: Alert) -> bool:
+    return a.rule_id in _BACKGROUND_RULES or bool(_BACKGROUND_GROUPS.intersection(a.groups))
+
+
+def host_steps(alerts: list[Alert]) -> list[dict]:
+    """After-login alerts grouped by rule, like the attack chain steps:
+    38 sudo commands are one row with x38, not 38 rows."""
+    by_rule: dict[str, list[Alert]] = defaultdict(list)
+    for a in alerts:
+        by_rule[a.rule_id].append(a)
+    rows = []
+    for rule_id, al in by_rule.items():
+        al.sort(key=lambda a: a.ts)
+        rows.append({
+            "rule_id": rule_id, "description": al[-1].description, "count": len(al),
+            "first": al[0].ts, "last": al[-1].ts, "severity": worst(a.severity for a in al),
+            "who": sorted({a.who for a in al if a.who}),
+            "mitre_ids": sorted({m for a in al for m in a.mitre_ids}), "example": al[-1],
+        })
+    return sorted(rows, key=lambda r: r["first"])

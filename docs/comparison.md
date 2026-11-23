@@ -14,7 +14,7 @@ host-only network). The last column is the custom rule in
 | Trellis rule | Wazuh built-in | Expected | Observed (default Wazuh) | Vigil rule |
 |---|---|---|---|---|
 | `ssh-brute-force` (5 fails / 60 s) | `5763` (8 / 120 s) | Detected, higher threshold | ✅ `5763` after 8 failures | `100100` at 5 |
-| `ssh-password-spray` (5 users / 300 s) | `5712` (8 / 120 s) | Partial | ✅ `5712` after 8; **37 alerts for 8 attempts** (one per sshd line) | `100102` at 5 |
+| `ssh-password-spray` (5 users / 300 s) | `5712` (8 / 120 s) | Partial | ✅ `5712`; 17 `5710` alerts for 8 attempts (sshd logs two lines per attempt) | `100102` at 5 (lab: fired) |
 | `ssh-brute-force-success` (15 min) | `40112` (240 s) | Only within 4 min | ❌ **3 wrong guesses then a login: only an INFO `5715`** (needs 8 failures before `40112` can fire) | `100100` + `100101` (lab: fired) |
 | `ssh-root-login` | `5715` (level 3) | Logged, not flagged | not run (root password login is off by default) | |
 | `sudo-root-shell` | `5402` (level 3) | Can't tell a shell apart | ❌ `sudo -i` = `5402`, level 3 | `100110` |
@@ -27,7 +27,7 @@ host-only network). The last column is the custom rule in
 | `web-xss` | `31105` | Detected | ✅ `31105` | |
 | `web-path-traversal` | `31104` | Detected | ✅ `31104`, `31153` | |
 | `web-scanner-user-agent` | `31508` | Likely gap | ❌ **`31508` never fired** for Nikto 2.1.5 (`Mozilla/5.00 (Nikto/…)`) or `gobuster/3.6` | `100130` |
-| `web-404-flood` (20 / 60 s) | `31151` (14 / 90 s) | Detected | ✅ `31151`, but **~380 times for one scan** | (Vigil groups them) |
+| `web-404-flood` (20 / 60 s) | `31151` (14 / 90 s) | Detected | ✅ `31151`, but it refires every 14 errors: hundreds of alerts per scan | `100130` names the tool (2-min cool-down); Vigil groups the rest |
 | `web-sensitive-file-probe` | `31101` | Gap | ⚠️ plain `31101` 404s; a few `31516` "suspicious URL" | still open |
 | `web-login-brute-force` | `31509` (WP/Joomla) | Gap | not run (no login page on web01) | |
 | `web-recon-then-ssh-login` | none | Gap | ❌ same IP scanned the site, then broke into SSH: no correlating alert (Vigil's attack chain shows it) | still open |
@@ -99,8 +99,10 @@ then SSH from the same IP).
    added `/var/log/auth.log` (the same messages, via rsyslog) and a second
    copy of the nginx log. Counts in the first runs (~4,500 `31101`, 37 alerts
    for 8 SSH attempts) are roughly double, and thresholds fired at about
-   half the real attempts. Fixed in `install-agent.sh`; scenarios 1, 3 and 4
-   need re-running for real counts. Bonus trap: rsyslog folds repeats into
+   half the real attempts. Fixed in `install-agent.sh` and verified: a
+   re-run of scenario 1 sent 12,816 requests (nginx's own count) and raised
+   about 10,000 web alerts, under one per request (the rest were normal
+   `200`s). The SSH spray went from 37 alerts to 17 for the same 8 attempts. Bonus trap: rsyslog folds repeats into
    `message repeated 5 times: [...]`, so a SIEM reading only auth.log sees
    one failed login where there were five. Read the journal.
 4. **ATT&CK tags inflate scans.** Web-attack rules carry techniques like

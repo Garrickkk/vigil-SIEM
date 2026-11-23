@@ -198,3 +198,15 @@ def test_triage_handles_many_ids():
     t.set(ids[:600], "closed")
     s = t.statuses(ids)
     assert s["id0"] == "closed" and s["id1199"] == "open"
+
+
+def test_after_login_is_grouped_by_rule_without_background_noise():
+    login = alert(id="login", rule_id="40112", ts="2026-11-09T10:00:00.000+0700")
+    sudos = [alert(id=f"s{i}", rule_id="5402", srcip=None, srcuser="deploy", dstuser="root",
+                   ts=f"2026-11-09T10:0{i + 1}:00.000+0700") for i in range(3)]
+    sca = alert(id="sca", rule_id="19010", srcip=None, groups=("sca",), ts="2026-11-09T10:05:00.000+0700")
+    status = alert(id="st", rule_id="506", srcip=None, groups=("ossec",), ts="2026-11-09T10:06:00.000+0700")
+    out = stats.follow_up([login], {"web01": sudos + [sca, status]})
+    steps = out[0]["steps"]
+    assert [(s["rule_id"], s["count"]) for s in steps] == [("5402", 3)]
+    assert steps[0]["who"] == ["deploy → root"]

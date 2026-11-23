@@ -67,6 +67,10 @@ it works end to end, with real timing:
   every request.** Matching each scanner request directly would replace
   `31101` and stop `31151` counting 404s. The cost: a scanner that only gets
   `200` responses isn't named.
+- **`100130` has a 2-minute cool-down.** Without it, one gobuster run raised
+  763 of them (it inherits `31151` refiring every 14 errors). Wazuh's
+  `ignore` is per rule, not per source IP, so a second scanner within those
+  2 minutes shows as plain `31151`.
 - **`100110`/`100111` match common shells and download tools.** Something
   like `sudo python3 -c '…'` still gets through; this is a starting point.
 

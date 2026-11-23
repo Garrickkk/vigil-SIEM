@@ -13,6 +13,31 @@ the part Wazuh's own UI makes slow: deciding what matters.
 
 ![Overview](docs/overview.png)
 
+All screenshots are from the real lab: Wazuh 4.14.7 on Docker Desktop, an
+Ubuntu 24.04 victim with nginx, and an attacker VM running the scenarios in
+[docs/attack-scenarios.md](docs/attack-scenarios.md).
+
+## Results
+
+I ran six attack scenarios (web scanning, web attacks, SSH spraying and
+brute force, privilege escalation, persistence, a backdoor listener) against
+Wazuh's default ruleset and compared it with Trellis on the same attacks.
+Full write-up: **[docs/comparison.md](docs/comparison.md)**.
+
+- Default Wazuh fully caught 7 of 16 Trellis detections, partly caught 4 and
+  missed 5. Nine custom rules in [`rules/`](rules/) close 7 of the 9 gaps;
+  each was tested with `wazuh-logtest` and confirmed firing in the lab.
+- **Brute-force blind spot:** a login after fewer than 8 failed passwords is
+  an INFO-level event, identical to a normal login.
+- **The first sudo hides everything:** Wazuh's "first time user executed
+  sudo" rule is checked before "sudo to ROOT", so on an account's first sudo
+  (an attacker's first root shell) no rule under it runs.
+- **A silent failure:** Wazuh's listening-port check needs `netstat`, which
+  Ubuntu 24.04 doesn't install. The rule just never fires.
+- **A mistake I made and fixed:** my agent setup read every event twice
+  (journal + auth.log), doubling counts and halving thresholds. Found it
+  when the numbers didn't add up; the write-up shows both.
+
 ## What's in here
 
 - **`setup/vigil.ps1`**: one command to run Wazuh on Windows with Docker
@@ -52,6 +77,10 @@ the part Wazuh's own UI makes slow: deciding what matters.
   each with test logs.
 - **`docs/`**: lab setup, the attack scenarios, and a
   [Trellis vs Wazuh comparison](docs/comparison.md).
+
+![Attack chain](docs/attack_chain.png)
+
+![Custom rules firing](docs/rules.png)
 
 ## Quick start: try the dashboard
 

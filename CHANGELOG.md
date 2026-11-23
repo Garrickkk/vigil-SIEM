@@ -2,6 +2,12 @@
 
 Versions follow 0.MINOR.PATCH until 1.0: minor = feature, patch = fix or docs.
 
+## 0.4.0
+
+- 'After the login' grouped by rule; configuration-scan and agent-status alerts left out
+- 100130 gets a 2-minute cool-down (one gobuster run raised 763)
+- Scenario 1 and 3 re-run with single counting; README opens with results
+
 ## 0.3.4
 
 - Every custom rule confirmed against re-run attacks
